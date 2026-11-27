@@ -50,11 +50,22 @@ struct DealRow: View {
                     pill
                     name
                     if deal.kind != .sale, !deal.datesLine.isEmpty {
-                        Text(deal.datesLine)
-                            .font(.subheadline)
-                            .monospacedDigit()
-                            .lineLimit(2)
-                            .padding(.top, 2)
+                        // One line when it fits; otherwise the dates, then the nights, never a dangling "·".
+                        ViewThatFits(in: .horizontal) {
+                            Text(deal.datesLine)
+                                .lineLimit(1)
+                            VStack(alignment: .leading, spacing: 1) {
+                                if let dates = deal.dates {
+                                    Text(dates).lineLimit(2)
+                                }
+                                if let nights = deal.data.nights {
+                                    Text(Fmt.nights(nights))
+                                }
+                            }
+                        }
+                        .font(.subheadline)
+                        .monospacedDigit()
+                        .padding(.top, 2)
                     }
                 }
                 Spacer(minLength: 8)
