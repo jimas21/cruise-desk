@@ -1,38 +1,5 @@
 import SwiftUI
 
-enum DealFilter: String, CaseIterable, Identifiable {
-    case all, fits, call, drop, sale
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .all: return "All"
-        case .fits: return "Fits"
-        case .call: return "Your call"
-        case .drop: return "Drops"
-        case .sale: return "Sales"
-        }
-    }
-
-    func matches(_ deal: Deal) -> Bool {
-        self == .all || deal.kind?.rawValue == rawValue
-    }
-}
-
-enum DealSort: String, CaseIterable, Identifiable {
-    case newest, score
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .newest: return "Newest"
-        case .score: return "Best score"
-        }
-    }
-}
-
 /// Opens the answer sheet for one deal with a verdict already chosen.
 struct AnswerTarget: Identifiable {
     let deal: Deal
@@ -40,27 +7,36 @@ struct AnswerTarget: Identifiable {
     var id: String { "\(deal.id)/\(verdict.rawValue)" }
 }
 
-/// Tab 1: deals with no answer yet.
+/// Tab 1: deals with no answer yet, in two buckets (DESIGN_V2 section 2): Best deals (everything, best first)
+/// and For my trip (the ones that pass My Trip). A sort menu and a filter sheet work on both.
 struct DealsView: View {
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var router: Router
-    @State private var filter: DealFilter = .all
-    @AppStorage("dealSort") private var sort: DealSort = .newest
+    @State private var bucket: DealBucket
+    @AppStorage("dealSort") private var sort: DealSort = .score
+    @AppStorage("dealFilters") private var filtersText: String = ""
     @State private var showStatus = false
     @State private var showSettings = false
+    @State private var showFilters = false
+    @State private var showTrip = false
     @State private var answering: AnswerTarget?
 
-    private var items: [Deal] {
-        let matching = store.inbox.filter { filter.matches($0) }
-        switch sort {
-        case .newest:
-            return matching
-        case .score:
-            return matching.sorted { ($0.data.score ?? 0, $0.latest) > ($1.data.score ?? 0, $1.latest) }
-        }
+    init(bucket: DealBucket = .best) {
+        _bucket = State(initialValue: bucket)
+    }
+
+    private var filters: DealFilters { DealFilters.decode(filtersText) }
+
+    private var filtersBinding: Binding<DealFilters> {
+        Binding(get: { DealFilters.decode(filtersText) }, set: { filtersText = $0.encoded() })
     }
 
     var body: some View {
+        let filters = self.filters
+        let best = store.bucket(.best, filters: filters, sort: sort)
+        let mine = store.bucket(.trip, filters: filters, sort: sort)
+        let items = bucket == .best ? best : mine
+
         NavigationStack(path: $router.dealsPath) {
             List {
                 Section {
@@ -68,15 +44,28 @@ struct DealsView: View {
                         .listRowInsets(EdgeInsets(top: 4, leading: CardList.gutter, bottom: 4, trailing: CardList.gutter))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                    Picker("Show", selection: $filter.animation(Motion.snappy)) {
-                        ForEach(DealFilter.allCases) { option in
-                            Text(option.title).tag(option)
-                        }
+                    Picker("Show", selection: $bucket.animation(Motion.snappy)) {
+                        Text("\(DealBucket.best.title)  \(best.count)").tag(DealBucket.best)
+                        Text("\(DealBucket.trip.title)  \(mine.count)").tag(DealBucket.trip)
                     }
                     .pickerStyle(.segmented)
-                    .listRowInsets(EdgeInsets(top: 10, leading: CardList.gutter, bottom: 8, trailing: CardList.gutter))
+                    .listRowInsets(EdgeInsets(top: 10, leading: CardList.gutter, bottom: 4, trailing: CardList.gutter))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
+                    if bucket == .trip {
+                        TripSummaryRow(trip: store.trip) { showTrip = true }
+                            .listRowInsets(EdgeInsets(top: 4, leading: CardList.gutter, bottom: 4, trailing: CardList.gutter))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                    if filters.isActive {
+                        FilterSummaryRow(filters: filters, open: { showFilters = true }, clear: {
+                            withAnimation(Motion.snappy) { filtersText = "" }
+                        })
+                        .listRowInsets(EdgeInsets(top: 2, leading: CardList.gutter, bottom: 4, trailing: CardList.gutter))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
                 }
                 .listSectionSeparator(.hidden)
 
@@ -86,7 +75,7 @@ struct DealsView: View {
 
                 if items.isEmpty {
                     Section {
-                        EmptyInbox(filter: filter, anyDeals: !store.inbox.isEmpty)
+                        emptyState(bestCount: best.count)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
@@ -94,67 +83,38 @@ struct DealsView: View {
                 } else {
                     Section {
                         ForEach(items) { deal in
-                            Button {
-                                router.dealsPath.append(deal.id)
-                            } label: {
-                                DealCard(deal: deal)
-                            }
-                            .buttonStyle(CardPressStyle())
-                            .cardRow()
-                            .accessibilityHint(Text("Opens the details"))
-                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                Button {
-                                    answering = AnswerTarget(deal: deal, verdict: .interested)
-                                } label: {
-                                    Label("Interested", systemImage: Verdict.interested.symbol)
-                                }
-                                .tint(Palette.fits)
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button {
-                                    answering = AnswerTarget(deal: deal, verdict: .pass)
-                                } label: {
-                                    Label("Not for me", systemImage: Verdict.pass.symbol)
-                                }
-                                .tint(.red)
-                                Button {
-                                    withAnimation(Motion.spring) {
-                                        store.answer(deal, verdict: .later, reasons: [], note: "")
-                                    }
-                                } label: {
-                                    Label("Later", systemImage: Verdict.later.symbol)
-                                }
-                                .tint(.gray)
-                            }
-                            .accessibilityAction(named: Text("Interested")) {
-                                answering = AnswerTarget(deal: deal, verdict: .interested)
-                            }
-                            .accessibilityAction(named: Text("Not for me")) {
-                                answering = AnswerTarget(deal: deal, verdict: .pass)
-                            }
-                            .accessibilityAction(named: Text("Later")) {
-                                withAnimation(Motion.spring) {
-                                    store.answer(deal, verdict: .later, reasons: [], note: "")
-                                }
-                            }
+                            card(deal)
                         }
                     }
                     .listSectionSeparator(.hidden)
                 }
             }
             .cardList()
-            .onChange(of: filter) { Haptics.tap() }
+            .onChange(of: bucket) { Haptics.tap() }
             .navigationTitle("Deals")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItemGroup(placement: .topBarLeading) {
                     Button {
                         showSettings = true
                     } label: {
                         Image(systemName: "gearshape")
                     }
                     .accessibilityLabel(Text("Settings"))
+                    Button {
+                        router.showAsk = true
+                    } label: {
+                        Image(systemName: "bubble.left.and.text.bubble.right")
+                    }
+                    .accessibilityLabel(Text("Ask Deal Desk"))
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        showFilters = true
+                    } label: {
+                        Image(systemName: filters.isActive ? "line.3.horizontal.decrease.circle.fill"
+                                                           : "line.3.horizontal.decrease.circle")
+                    }
+                    .accessibilityLabel(Text(filters.isActive ? "Filters, \(filters.activeCount) on" : "Filters"))
                     Menu {
                         Picker("Sort", selection: $sort) {
                             ForEach(DealSort.allCases) { option in
@@ -164,7 +124,7 @@ struct DealsView: View {
                     } label: {
                         Image(systemName: "arrow.up.arrow.down")
                     }
-                    .accessibilityLabel(Text("Sort"))
+                    .accessibilityLabel(Text("Sort, \(sort.title)"))
                 }
             }
             .refreshable {
@@ -179,10 +139,165 @@ struct DealsView: View {
             .sheet(isPresented: $showSettings) {
                 NavigationStack { SettingsView() }
             }
+            .sheet(isPresented: $showFilters) {
+                FilterSheet(filters: filtersBinding, deals: store.inbox)
+            }
+            .sheet(isPresented: $showTrip) {
+                TripEditor(start: store.trip ?? TripPrefs(), isNew: store.trip == nil)
+            }
+            .sheet(isPresented: $router.showAsk) {
+                AskSheet()
+            }
             .sheet(item: $answering) { target in
                 AnswerSheet(deal: target.deal, verdict: target.verdict, existing: nil)
             }
         }
+    }
+
+    // MARK: Cards
+
+    private func card(_ deal: Deal) -> some View {
+        let fit = store.fit(deal)
+        let note = bucket == .best ? FitNote.best(fit) : FitNote.trip(fit)
+        return Button {
+            router.dealsPath.append(deal.id)
+        } label: {
+            DealCard(deal: deal, note: note)
+        }
+        .buttonStyle(CardPressStyle())
+        .cardRow()
+        .accessibilityHint(Text("Opens the details"))
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button {
+                answering = AnswerTarget(deal: deal, verdict: .interested)
+            } label: {
+                Label("Interested", systemImage: Verdict.interested.symbol)
+            }
+            .tint(Palette.fits)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button {
+                answering = AnswerTarget(deal: deal, verdict: .pass)
+            } label: {
+                Label("Not for me", systemImage: Verdict.pass.symbol)
+            }
+            .tint(.red)
+            Button {
+                withAnimation(Motion.spring) {
+                    store.answer(deal, verdict: .later, reasons: [], note: "")
+                }
+            } label: {
+                Label("Later", systemImage: Verdict.later.symbol)
+            }
+            .tint(.gray)
+        }
+        .accessibilityAction(named: Text("Interested")) {
+            answering = AnswerTarget(deal: deal, verdict: .interested)
+        }
+        .accessibilityAction(named: Text("Not for me")) {
+            answering = AnswerTarget(deal: deal, verdict: .pass)
+        }
+        .accessibilityAction(named: Text("Later")) {
+            withAnimation(Motion.spring) {
+                store.answer(deal, verdict: .later, reasons: [], note: "")
+            }
+        }
+    }
+
+    // MARK: Empty states
+
+    @ViewBuilder
+    private func emptyState(bestCount: Int) -> some View {
+        if filters.isActive {
+            VStack(spacing: 0) {
+                IllustratedEmpty(title: "Nothing matches these filters",
+                                 message: "Clear them to see every deal again.")
+                Button("Clear filters") {
+                    withAnimation(Motion.snappy) { filtersText = "" }
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+            }
+            .frame(maxWidth: .infinity)
+        } else if bucket == .trip {
+            VStack(spacing: 0) {
+                IllustratedEmpty(title: "Nothing fits your trip yet",
+                                 message: bestCount > 0
+                                    ? "\(bestCount) other \(bestCount == 1 ? "deal is" : "deals are") under Best deals. Loosen My Trip to see more here."
+                                    : "Claude checks every hour and pings you when one fits.")
+                Button("Edit My Trip") { showTrip = true }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+            }
+            .frame(maxWidth: .infinity)
+        } else {
+            IllustratedEmpty(title: "All caught up",
+                             message: "No deals waiting for an answer. Claude checks every hour and pings you when one is worth a look.")
+        }
+    }
+}
+
+/// For my trip: what the bucket is measuring against, one line, with a way to change it.
+struct TripSummaryRow: View {
+    let trip: TripPrefs?
+    let edit: () -> Void
+
+    var body: some View {
+        Button(action: edit) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: "suitcase.fill")
+                    .font(.body)
+                    .foregroundStyle(Palette.accent)
+                    .frame(width: 26)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("My Trip")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.primary)
+                    Text(trip?.summary ?? "Not set up yet: using Claude's own trip rules")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 8)
+                Text("Edit")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Palette.accent)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(CardBackground())
+        }
+        .buttonStyle(CardPressStyle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(Text("Opens My Trip"))
+    }
+}
+
+/// "Filters: Oasis · Balcony" with Clear, shown while any filter is on.
+private struct FilterSummaryRow: View {
+    let filters: DealFilters
+    let open: () -> Void
+    let clear: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: open) {
+                HStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease")
+                    Text(filters.summary)
+                        .lineLimit(1)
+                }
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Palette.accent)
+            }
+            .buttonStyle(.borderless)
+            Spacer(minLength: 8)
+            Button("Clear", action: clear)
+                .font(.footnote.weight(.semibold))
+                .buttonStyle(.borderless)
+        }
+        .padding(.horizontal, 4)
     }
 }
 
@@ -319,22 +434,14 @@ struct ProblemRow: View {
     }
 }
 
-private struct EmptyInbox: View {
-    let filter: DealFilter
-    let anyDeals: Bool
-
-    var body: some View {
-        if filter != .all && anyDeals {
-            IllustratedEmpty(title: "None in \(filter.title)", message: "Other deals are waiting under All.")
-        } else {
-            IllustratedEmpty(title: "All caught up",
-                             message: "No deals waiting for an answer. Claude checks every hour and pings you when one is worth a look.")
-        }
-    }
-}
-
 #Preview("Deals") {
     DealsView()
+        .environmentObject(Store.preview())
+        .environmentObject(Router())
+}
+
+#Preview("For my trip") {
+    DealsView(bucket: .trip)
         .environmentObject(Store.preview())
         .environmentObject(Router())
 }

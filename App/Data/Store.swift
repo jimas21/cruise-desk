@@ -95,6 +95,12 @@ final class Store: ObservableObject {
     @Published private(set) var status: RunStatus?
     @Published private(set) var profile: [String] = []
     @Published private(set) var watchlist: [WatchItem] = []
+    /// Questions to Deal Desk, oldest first (each deal's thread and the general one).
+    @Published private(set) var questions: [Question] = []
+    /// `prefs/trip`, or nil until it exists on the server (then the brain's own verdicts are used).
+    @Published private(set) var trip: TripPrefs?
+    /// Price history per deal, fetched when a deal's detail opens.
+    @Published private(set) var history: [String: [PricePoint]] = [:]
     @Published private(set) var syncing = false
     @Published private(set) var problem: Problem?
     @Published private(set) var lastSync: Date?
@@ -119,6 +125,7 @@ final class Store: ObservableObject {
             isPreview = true
             cache = CacheFile(serverTime: nil, savedAt: Date(), colls: previewDocs)
             queue = []
+            history = Samples.history
         } else {
             isPreview = false
             Connection.bootstrap()
@@ -152,6 +159,34 @@ final class Store: ObservableObject {
 
     func isPending(_ coll: String, _ id: String) -> Bool {
         pendingKeys.contains("\(coll)/\(id)")
+    }
+
+    // MARK: - Buckets (DESIGN_V2 section 2)
+
+    /// Does this deal fit My Trip? Worked out live from `prefs/trip`, so the buckets move as soon as it changes.
+    func fit(_ deal: Deal) -> TripFit {
+        TripCheck.verdict(for: deal, prefs: trip)
+    }
+
+    /// The Deals tab: unanswered deals in one bucket, narrowed by the filters and sorted.
+    func bucket(_ bucket: DealBucket, filters: DealFilters, sort: DealSort) -> [Deal] {
+        var list = inbox.filter { filters.matches($0) }
+        if bucket == .trip { list = list.filter { fit($0).fits } }
+        return DealOrder.sorted(list, by: sort, preferred: { self.fit($0).preferred })
+    }
+
+    // MARK: - Questions
+
+    func question(_ id: String) -> Question? { questions.first { $0.id == id } }
+
+    /// One deal's thread, or the general one when `dealId` is nil.
+    func thread(_ dealId: String?) -> [Question] {
+        questions.filter { $0.data.dealId == dealId }
+    }
+
+    /// True while a question asked in the last 10 minutes has no answer yet.
+    func awaitingAnswer(_ dealId: String?) -> Bool {
+        thread(dealId).contains { !$0.isAnswered && Date().timeIntervalSince($0.asked) < 600 }
     }
 
     // MARK: - Sync
@@ -356,6 +391,35 @@ final class Store: ObservableObject {
         Haptics.tap()
     }
 
+    /// Saves My Trip. The buckets re-sort at once from the queued change; the brain reads it on its next run.
+    func saveTrip(_ prefs: TripPrefs) {
+        enqueue(.upsert, "prefs", "trip", prefs.cleaned().fields())
+        Haptics.success()
+    }
+
+    /// Asks Deal Desk about a deal (or in general). The answerer on the server replies within a minute or two
+    /// and the phone gets an "Answer ready" push.
+    @discardableResult
+    func ask(_ text: String, dealId: String?) -> String? {
+        let body = text.trimmed.capped(500)
+        guard !body.isEmpty else { return nil }
+        let id = Store.newId(prefix: "q")
+        var fields: [String: JSONValue] = ["text": .string(body), "askedAt": .string(Fmt.stamp())]
+        if let dealId { fields["dealId"] = .string(dealId) }
+        enqueue(.upsert, "questions", id, fields)
+        Haptics.success()
+        return id
+    }
+
+    /// Fetches a deal's price history for the sparkline (kept for this session).
+    func loadHistory(_ dealId: String) async {
+        if isPreview || !Router.isValidId(dealId) { return }
+        guard let client = Connection.client() else { return }
+        if let points = try? await client.history(dealId: dealId) {
+            history[dealId] = points
+        }
+    }
+
     func savePlayNote(playId: String, status: PlayNoteStatus, note: String) {
         enqueue(.upsert, "playnotes", playId, [
             "status": .string(status.rawValue),
@@ -501,6 +565,12 @@ final class Store: ObservableObject {
         watchlist = (colls["watchlist"] ?? [:]).values
             .compactMap { WatchItem(raw: $0) }
             .sorted { ($0.sailDay ?? .distantFuture) < ($1.sailDay ?? .distantFuture) }
+
+        questions = (colls["questions"] ?? [:]).values
+            .compactMap { Question(raw: $0) }
+            .sorted { ($0.asked, $0.id) < ($1.asked, $1.id) }
+
+        trip = colls["prefs"]?["trip"].flatMap { $0.data.decode(TripPrefs.self) }
 
         pendingKeys = Set(queue.map { "\($0.coll)/\($0.docId)" })
         updateBadge()

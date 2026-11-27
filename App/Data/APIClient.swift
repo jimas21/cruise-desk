@@ -20,6 +20,10 @@ struct SyncResult: Decodable {
     var deleted: [Tombstone]?
 }
 
+struct HistoryResult: Decodable {
+    var history: [PricePoint]
+}
+
 struct Tombstone: Decodable {
     var coll: String
     var id: String
@@ -72,6 +76,16 @@ struct APIClient {
     func delete(_ coll: String, _ id: String, ifVersion: Int) async throws {
         _ = try await call("DELETE", "/v1/\(coll)/\(id)",
                            query: [URLQueryItem(name: "ifVersion", value: String(ifVersion))])
+    }
+
+    /// That deal's price history, oldest first (`GET /v1/deals/{id}/history`), for the sparkline.
+    func history(dealId: String) async throws -> [PricePoint] {
+        let data = try await call("GET", "/v1/deals/\(dealId)/history")
+        do {
+            return try JSONDecoder().decode(HistoryResult.self, from: data).history
+        } catch {
+            throw APIError.server("The price history came back in a shape this version can't read.")
+        }
     }
 
     func registerDevice(token deviceToken: String, environment: String) async throws {

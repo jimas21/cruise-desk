@@ -5,6 +5,7 @@ struct RulesView: View {
     @EnvironmentObject private var store: Store
     @State private var adding = false
     @State private var deleting: Rule?
+    @State private var showTrip = false
 
     private func rules(_ statuses: Set<RuleStatus>) -> [Rule] {
         store.rules.filter { rule in rule.status.map { statuses.contains($0) } ?? false }
@@ -52,6 +53,35 @@ struct RulesView: View {
                     }
                 }
 
+                Section {
+                    Button {
+                        showTrip = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "suitcase.fill")
+                                .foregroundStyle(Palette.accent)
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("My Trip")
+                                    .foregroundStyle(Color.primary)
+                                Text(store.trip?.summary ?? "Not set up yet: Claude uses the rules it started with")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .accessibilityHint(Text("Opens My Trip"))
+                } header: {
+                    Text("Trip settings")
+                } footer: {
+                    Text("Ships, length, cabin, budget, ports and dates. For my trip and Claude both use them.")
+                }
+
                 if !store.profile.isEmpty {
                     Section("What Claude looks for") {
                         ForEach(Array(store.profile.enumerated()), id: \.offset) { item in
@@ -67,6 +97,9 @@ struct RulesView: View {
             .refreshable { await store.refresh() }
             .sheet(isPresented: $adding) {
                 AddRuleSheet()
+            }
+            .sheet(isPresented: $showTrip) {
+                TripEditor(start: store.trip ?? TripPrefs(), isNew: store.trip == nil)
             }
             .confirmationDialog("Delete this rule?", isPresented: deletingShown, titleVisibility: .visible,
                                 presenting: deleting) { rule in

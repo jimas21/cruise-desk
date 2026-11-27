@@ -63,8 +63,46 @@ struct OfferRow: Codable, Hashable {
     var value: String
 }
 
-/// `deals/<id>` data, exactly the fields in DESIGN.md. Everything is optional here so one odd document never
-/// hides the rest; the server enforces the real schema.
+enum ShipClass: String, CaseIterable, Identifiable {
+    case icon, oasis, quantum, other
+
+    var id: String { rawValue }
+
+    /// "Icon", "Oasis", "Quantum", "Smaller"
+    var short: String {
+        switch self {
+        case .icon: return "Icon"
+        case .oasis: return "Oasis"
+        case .quantum: return "Quantum"
+        case .other: return "Smaller"
+        }
+    }
+
+    /// "Icon class", or "Smaller ship"
+    var title: String { self == .other ? "Smaller ship" : "\(short) class" }
+}
+
+/// One cabin category a source lists for the sailing (v2 `cabinOptions`).
+struct CabinOption: Codable, Hashable {
+    var category: String?
+    var type: String?
+    var pricePP: Int?
+    var taxesIncluded: Bool?
+    var source: String?
+}
+
+/// One day of the itinerary (v2 `itineraryDays`): arrive/depart are short clock texts like "7:00 AM".
+struct ItineraryDay: Codable, Hashable {
+    var day: Int?
+    var date: String?
+    var port: String?
+    var arrive: String?
+    var depart: String?
+}
+
+/// `deals/<id>` data, exactly the fields in DESIGN.md and DESIGN_V2.md. Everything is optional here so one odd
+/// document never hides the rest; the server enforces the real schema. v1 fields (`usualPP`, `ports`) are still
+/// read, so deals written before v2 render the same way.
 struct DealData: Codable, Hashable {
     var kind: String?
     var ship: String?
@@ -104,6 +142,18 @@ struct DealData: Codable, Hashable {
     var endsAt: String?
     var postedAt: String?
     var changedAt: String?
+    // v2: the summary sheet and the scoop
+    var returnDate: String?
+    var stops: [String]?
+    var typicalPP: Int?
+    var lowPP: Int?
+    var highPP: Int?
+    var pctUnderTypical: Int?
+    var cabinOptions: [CabinOption]?
+    var itineraryDays: [ItineraryDay]?
+    var scoop: String?
+    var fitsTrip: Bool?
+    var failsBecause: [String]?
 }
 
 struct Deal: Identifiable, Hashable {
@@ -155,6 +205,178 @@ struct Deal: Identifiable, Hashable {
         guard let previous = data.previousPP, let now = data.pricePP, previous > now else { return nil }
         return previous - now
     }
+
+    // MARK: v2 summary sheet
+
+    var shipClass: ShipClass? { data.shipClass.flatMap { ShipClass(rawValue: $0) } }
+
+    /// The typical price per person: v2 `typicalPP`, or v1 `usualPP` on older deals.
+    var typicalPP: Int? { data.typicalPP ?? data.usualPP }
+
+    /// The exact category when the source names it ("Ocean View Balcony"), else the cabin type ("Balcony").
+    var cabinLabel: String? {
+        if let name = data.cabinName?.trimmed, !name.isEmpty { return name }
+        return cabinTitle
+    }
+
+    /// Last day of the trip: `returnDate`, else the sail date plus the nights.
+    var returnDay: Date? {
+        if let day = Fmt.day(data.returnDate) { return day }
+        guard let start = sailDay, let nights = data.nights, nights > 0 else { return nil }
+        return Fmt.adding(days: nights, to: start)
+    }
+
+    /// "Sun Sep 5 – Sat Sep 11, 2027"
+    var dates: String? {
+        guard let start = sailDay else { return nil }
+        return Fmt.tripDates(from: start, to: returnDay)
+    }
+
+    /// "Sun Sep 5 – Sat Sep 11, 2027 · 6 nights"
+    var datesLine: String {
+        [dates, data.nights.map { Fmt.nights($0) }].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// The ports of call in order: v2 `stops`, else v1 `ports`; sea days and the embark/return port left out.
+    var portsOfCall: [String] {
+        let raw = (data.stops?.isEmpty == false ? data.stops : nil) ?? data.ports ?? []
+        var list = raw.map { $0.trimmed }.filter { !$0.isEmpty && !Deal.isSeaDay($0) }
+        if let from = data.port?.trimmed, !from.isEmpty, let first = list.first, Deal.samePlace(first, from) {
+            list.removeFirst()
+        }
+        if let back = returnPort, let last = list.last, Deal.samePlace(last, back) {
+            list.removeLast()
+        }
+        return list
+    }
+
+    /// Where the trip ends: the embark port for a round trip, else the last port of the itinerary.
+    var returnPort: String? {
+        if data.roundTrip == true { return data.port }
+        let days = (data.itineraryDays ?? []).compactMap { $0.port?.trimmed }
+        if let last = days.last(where: { !$0.isEmpty && !Deal.isSeaDay($0) }) { return last }
+        return data.roundTrip == false ? nil : data.port
+    }
+
+    /// "Galveston → Cozumel · Roatán · Costa Maya → Galveston": embark port, stops in order, return port.
+    var route: String? {
+        let stops = portsOfCall
+        guard let from = data.port?.trimmed, !from.isEmpty else {
+            return stops.isEmpty ? nil : stops.joined(separator: " · ")
+        }
+        if stops.isEmpty {
+            if data.roundTrip == true { return "\(from) round trip" }
+            if let back = returnPort, !Deal.samePlace(back, from) { return "\(from) → \(back)" }
+            return from
+        }
+        var line = "\(from) → \(stops.joined(separator: " · "))"
+        if let back = returnPort, !back.isEmpty { line += " → \(back)" }
+        return line
+    }
+
+    /// Percent under the typical price (negative = over): the deal's own figure, else worked out from typical.
+    var pctUnder: Int? {
+        if let pct = data.pctUnderTypical { return pct }
+        guard let typical = typicalPP, typical > 0, let price = data.pricePP, price > 0 else { return nil }
+        return Int((Double(typical - price) / Double(typical) * 100).rounded())
+    }
+
+    /// The price meter: this price against low / typical / high for that ship and cabin type.
+    struct PriceRange: Hashable {
+        let price: Int
+        let low: Int?
+        let typical: Int?
+        let high: Int?
+
+        /// The ends of the bar: every known point fits inside.
+        var bounds: (lo: Int, hi: Int) {
+            let points = [price, low, typical, high].compactMap { $0 }
+            let lo = points.min() ?? price
+            let hi = points.max() ?? price
+            return (lo, max(hi, lo + 1))
+        }
+
+        func fraction(_ value: Int) -> Double {
+            let b = bounds
+            return min(max(Double(value - b.lo) / Double(b.hi - b.lo), 0), 1)
+        }
+    }
+
+    var priceRange: PriceRange? {
+        guard data.kind != DealKind.sale.rawValue, let price = data.pricePP, price > 0 else { return nil }
+        let low = data.lowPP ?? data.lowestSeenPP
+        let typical = typicalPP
+        let high = data.highPP
+        if low == nil && typical == nil && high == nil { return nil }
+        return PriceRange(price: price, low: low, typical: typical, high: high)
+    }
+
+    /// For sorting and the budget check: the family total, else per person x 3 (a screen, not a quote).
+    var totalEstimate: Int? {
+        if let total = data.totalFor3, total > 0 { return total }
+        if let pp = data.pricePP, pp > 0 { return pp * 3 }
+        return nil
+    }
+
+    static func isSeaDay(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return lower.contains("at sea") || lower.contains("sea day") || lower.hasPrefix("cruising")
+    }
+
+    /// "Galveston" and "Galveston, Texas" are the same place.
+    static func samePlace(_ a: String, _ b: String) -> Bool {
+        let x = a.lowercased().trimmed
+        let y = b.lowercased().trimmed
+        guard !x.isEmpty, !y.isEmpty else { return false }
+        return x == y || x.hasPrefix(y + ",") || y.hasPrefix(x + ",")
+    }
+}
+
+// MARK: - Questions (Ask Deal Desk)
+
+struct QuestionSource: Codable, Hashable {
+    var name: String?
+    var url: String?
+}
+
+/// `questions/<id>`: the app writes `dealId?`, `text`, `askedAt`; the answerer writes `answer`, `answeredAt`,
+/// `sources`.
+struct QuestionData: Codable, Hashable {
+    var dealId: String?
+    var text: String?
+    var askedAt: String?
+    var answer: String?
+    var answeredAt: String?
+    var sources: [QuestionSource]?
+}
+
+struct Question: Identifiable, Hashable {
+    let id: String
+    let version: Int
+    let data: QuestionData
+
+    init?(raw: RawDoc) {
+        guard let decoded = raw.data.decode(QuestionData.self) else { return nil }
+        id = raw.id
+        version = raw.version
+        data = decoded
+    }
+
+    var text: String { data.text ?? "" }
+    var asked: Date { Fmt.timestamp(data.askedAt) ?? .distantPast }
+    var answer: String? { (data.answer?.trimmed.isEmpty == false) ? data.answer : nil }
+    var isAnswered: Bool { answer != nil }
+    var answered: Date? { Fmt.timestamp(data.answeredAt) }
+}
+
+/// One row of `GET /v1/deals/{id}/history`, for the sparkline.
+struct PricePoint: Codable, Hashable {
+    var pricePP: Int
+    var cabin: String?
+    var source: String?
+    var seenAt: String
+
+    var seen: Date? { Fmt.timestamp(seenAt) }
 }
 
 // MARK: - Answers (feedback)

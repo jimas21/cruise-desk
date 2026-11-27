@@ -2,15 +2,26 @@
 
 A native iPhone app for the cruise deal desk: the deals Claude finds, one glance per deal, answered with a swipe.
 
-- **Deals**: new deals with no answer yet. Each row answers four questions in one look: what (ship, nights,
-  dates), where from, what it costs the family (one big number) and why it's good (one short line). Swipe right
-  for Interested, left for Not for me or Later. Tap for the details, grouped into short labelled sections.
+- **Deals**: new deals with no answer yet, in two buckets with counts: **Best deals** (everything, best score
+  first) and **For my trip** (the ones that pass My Trip, best value first). A sort menu (best score, lowest total,
+  biggest % under typical, soonest sailing, newest) and a filter sheet (ship class, nights, cabin, port or region,
+  sail month, most for the trip) work on both. Each deal is a calm summary sheet: ship and class, dates and nights,
+  the route with its stops, the cabin (and whether the ocean view is confirmed), the total for 3 with the price per
+  person, a price meter (low, typical, high) with how far under typical it is, and why it's worth a look. In Best
+  deals, a deal that misses My Trip says why in one small line. Swipe right for Interested, left for Not for me or
+  Later. Tap for the details: **The scoop** (Claude's plain-language write-up) first, then price, cabin options,
+  the day-by-day itinerary, a price-history sparkline, perks and deadlines, sources, and an **Ask** thread.
+- **My Trip**: ship classes, length, cabin, who's going, budget, ports, regions, dates and alerts, in plain words.
+  The buckets re-sort on the phone the moment it is saved; Claude reads the same settings on its next check.
+- **Ask Deal Desk**: ask about one deal (in its detail) or anything at all (the speech-bubble button on Deals).
+  The deal server answers within a minute or two and an "Answer ready" alert opens the thread.
 - **Reviewed**: answered deals by answer, with Claude's reply.
 - **Save**: every way to save, live offers first with their deadlines, then standing tricks.
 - **Rules**: Claude's suggested rules (Use / No), your rules (Pause), paused and declined ones, and what Claude
   looks for.
 
-It reads and writes the `dealdesk-api` server described in the cruise-watch design notes: `GET /v1/sync` on launch
+It reads and writes the `dealdesk-api` server described in the cruise-watch design notes (`prefs/trip` for My Trip,
+`questions` for Ask, `GET /v1/deals/{id}/history` for the sparkline): `GET /v1/sync` on launch
 and on pull to refresh, cached on the phone so it opens instantly and works offline (answers made offline are sent
 when the phone is back online), and versioned writes that re-sync and retry once when something changed at the same
 time. Alerts arrive as native push; a tap opens that deal. `dealdesk://deal/<id>` links do the same.

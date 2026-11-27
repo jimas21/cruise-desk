@@ -69,37 +69,90 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                             didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
-        let dealId = response.notification.request.content.userInfo["dealId"] as? String
+        let content = response.notification.request.content
+        let dealId = content.userInfo["dealId"] as? String
+        let isAnswer = Router.isAnswerAlert(content.title)
         completionHandler()
         Task { @MainActor in
-            if let dealId { Router.shared.openDeal(dealId) }
+            if isAnswer {
+                Router.shared.openAnswer(dealId, store: Store.shared)
+            } else if let dealId {
+                Router.shared.openDeal(dealId)
+            }
             Store.shared.kick()
         }
     }
 }
 
-/// Which tab is showing, and the Deals tab's navigation, so pushes and links can open a deal.
+/// Which tab is showing, and the Deals tab's navigation, so pushes and links can open a deal or a thread.
 @MainActor
 final class Router: ObservableObject {
     static let shared = Router()
 
     @Published var tab: AppTab = .deals
     @Published var dealsPath: [String] = []
+    /// The deal whose Ask thread should be scrolled into view when its detail shows.
+    @Published var askFocus: String?
+    /// The general "Ask Deal Desk" thread.
+    @Published var showAsk = false
 
     func openDeal(_ id: String) {
         guard Router.isValidId(id) else { return }
         tab = .deals
+        showAsk = false
         dealsPath = [id]
     }
 
-    /// `dealdesk://deal/<id>`
-    func handle(url: URL) {
-        guard url.scheme?.lowercased() == "dealdesk", url.host?.lowercased() == "deal" else { return }
-        let parts = url.pathComponents.filter { $0 != "/" }
-        if let id = parts.first { openDeal(id) }
+    /// Opens a deal at its Ask thread, or the general thread when there is no deal.
+    func openThread(dealId: String?) {
+        tab = .deals
+        if let dealId, Router.isValidId(dealId) {
+            showAsk = false
+            askFocus = dealId
+            dealsPath = [dealId]
+        } else {
+            dealsPath = []
+            showAsk = true
+        }
     }
 
-    static func isValidId(_ id: String) -> Bool {
+    /// An "Answer ready" push: its `dealId` names the deal asked about (or, defensively, the question itself).
+    func openAnswer(_ id: String?, store: Store) {
+        guard let id, Router.isValidId(id) else {
+            openThread(dealId: nil)
+            return
+        }
+        if store.deal(id) == nil, let question = store.question(id) {
+            openThread(dealId: question.data.dealId)
+        } else {
+            openThread(dealId: id)
+        }
+    }
+
+    /// `dealdesk://deal/<id>`, `dealdesk://deal/<id>/ask` and `dealdesk://ask`
+    func handle(url: URL) {
+        guard url.scheme?.lowercased() == "dealdesk" else { return }
+        let parts = url.pathComponents.filter { $0 != "/" }
+        switch url.host?.lowercased() ?? "" {
+        case "deal":
+            guard let id = parts.first else { return }
+            if parts.count > 1, parts[1].lowercased() == "ask" {
+                openThread(dealId: id)
+            } else {
+                openDeal(id)
+            }
+        case "ask":
+            openThread(dealId: nil)
+        default:
+            break
+        }
+    }
+
+    nonisolated static func isAnswerAlert(_ title: String) -> Bool {
+        title.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("answer ready")
+    }
+
+    nonisolated static func isValidId(_ id: String) -> Bool {
         !id.isEmpty && id.count <= 80 && id.allSatisfy { $0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "-") }
     }
 }

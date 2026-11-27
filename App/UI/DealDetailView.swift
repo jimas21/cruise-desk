@@ -1,14 +1,20 @@
 import SwiftUI
 
-/// One deal, in short labelled sections. Large title = ship; everything else is a label/value list.
+/// Places in the detail view a push, a link or a screenshot can open at.
+enum DetailFocus: String, Hashable {
+    case scoop, price, cabins, itinerary, history, ask
+}
+
+/// One deal: the hero, then The scoop first, then short labelled sections (DESIGN_V2 section 3).
 struct DealDetailView: View {
     let dealId: String
+    var focus: DetailFocus? = nil
     @EnvironmentObject private var store: Store
 
     var body: some View {
         if let deal = store.deal(dealId) {
             DealDetailContent(deal: deal, feedback: store.feedback[deal.id],
-                              pending: store.isPending("feedback", deal.id))
+                              pending: store.isPending("feedback", deal.id), focus: focus)
         } else {
             ContentUnavailableView {
                 Label(store.syncing ? "Loading the deal" : "Deal not found", systemImage: "tray")
@@ -25,61 +31,117 @@ private struct DealDetailContent: View {
     let deal: Deal
     let feedback: Feedback?
     let pending: Bool
+    let focus: DetailFocus?
+    @EnvironmentObject private var store: Store
+    @EnvironmentObject private var router: Router
     @State private var answering: Verdict?
     @State private var heroGone = false
 
     private var d: DealData { deal.data }
 
     var body: some View {
-        List {
-            Section {
-                DealHero(deal: deal)
-            }
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-            .listRowSeparator(.hidden)
+        ScrollViewReader { proxy in
+            List {
+                Section {
+                    DealHero(deal: deal)
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                .listRowSeparator(.hidden)
 
-            if let feedback, feedback.verdict != nil {
-                answerSection(feedback)
+                scoopSection
+                if let feedback, feedback.verdict != nil {
+                    answerSection(feedback)
+                }
+                if deal.kind == .sale {
+                    offersSection
+                } else {
+                    priceSection
+                    tripFitSection
+                }
+                whySection
+                if deal.kind != .sale {
+                    cabinSection
+                    cabinOptionsSection
+                    itinerarySection
+                    historySection
+                }
+                perksSection
+                sourcesSection
+                Section {
+                    AskThread(dealId: deal.id)
+                        .id(DetailFocus.ask)
+                } header: {
+                    Text("Ask about this deal")
+                } footer: {
+                    Text("Deal Desk looks it up and answers here, usually within a minute or two. You get an alert when it's ready.")
+                }
+                if let nearby = d.nearby, !nearby.isEmpty {
+                    Section("Nearby dates") { TextBlock(text: nearby) }
+                }
+                if let notes = d.notes, !notes.isEmpty {
+                    Section("Notes") { TextBlock(text: notes) }
+                }
             }
-            if deal.kind == .sale {
-                offersSection
-            } else {
-                priceSection
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(.compact)
+            .contentMargins(.top, 4, for: .scrollContent)
+            .modifier(ScrolledPast(threshold: 150, passed: $heroGone))
+            .navigationTitle(deal.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                // The hero carries the name; the bar shows it only once the hero has scrolled away.
+                ToolbarItem(placement: .principal) {
+                    Text(deal.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .opacity(heroGone ? 1 : 0)
+                        .accessibilityHidden(!heroGone)
+                }
             }
-            whySection
-            if deal.kind != .sale {
-                cabinSection
-                tripSection
+            .safeAreaInset(edge: .bottom) { bottomBar }
+            .sheet(item: $answering) { verdict in
+                AnswerSheet(deal: deal, verdict: verdict, existing: feedback)
             }
-            perksSection
-            sourcesSection
-            if let nearby = d.nearby, !nearby.isEmpty {
-                Section("Nearby dates") { TextBlock(text: nearby) }
+            .task(id: deal.id) {
+                await store.loadHistory(deal.id)
             }
-            if let notes = d.notes, !notes.isEmpty {
-                Section("Notes") { TextBlock(text: notes) }
+            .onAppear {
+                let target = focus ?? (router.askFocus == deal.id ? DetailFocus.ask : nil)
+                if router.askFocus == deal.id { router.askFocus = nil }
+                if let target { scroll(proxy, to: target) }
+            }
+            .onChange(of: router.askFocus) { _, id in
+                guard id == deal.id else { return }
+                router.askFocus = nil
+                scroll(proxy, to: .ask)
             }
         }
-        .listStyle(.insetGrouped)
-        .listSectionSpacing(.compact)
-        .contentMargins(.top, 4, for: .scrollContent)
-        .modifier(ScrolledPast(threshold: 150, passed: $heroGone))
-        .navigationTitle(deal.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            // The hero carries the name; the bar shows it only once the hero has scrolled away.
-            ToolbarItem(placement: .principal) {
-                Text(deal.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .opacity(heroGone ? 1 : 0)
-                    .accessibilityHidden(!heroGone)
-            }
+    }
+
+    private func scroll(_ proxy: ScrollViewProxy, to target: DetailFocus) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            proxy.scrollTo(target, anchor: .top)
         }
-        .safeAreaInset(edge: .bottom) { bottomBar }
-        .sheet(item: $answering) { verdict in
-            AnswerSheet(deal: deal, verdict: verdict, existing: feedback)
+    }
+
+    // MARK: The scoop
+
+    @ViewBuilder
+    private var scoopSection: some View {
+        if let scoop = d.scoop?.trimmed, !scoop.isEmpty {
+            Section {
+                Text(scoop)
+                    .font(.body)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .padding(.vertical, 4)
+                    .id(DetailFocus.scoop)
+            } header: {
+                Label("The scoop", systemImage: "sparkles")
+            }
         }
     }
 
@@ -123,6 +185,15 @@ private struct DealDetailContent: View {
 
     private var priceSection: some View {
         Section("Price") {
+            if let range = deal.priceRange {
+                PriceMeter(range: range, pctUnder: deal.pctUnder, style: .detail)
+                    .padding(.vertical, 6)
+                    .id(DetailFocus.price)
+            } else if let under = UnderTypical.text(pct: deal.pctUnder, typical: deal.typicalPP) {
+                Text(under)
+                    .font(.subheadline.weight(.semibold))
+                    .id(DetailFocus.price)
+            }
             if let total = d.totalFor3 {
                 InfoRow(label: "For 3", value: Fmt.usd(total), note: d.totalAssumes)
             }
@@ -132,16 +203,15 @@ private struct DealDetailContent: View {
             if let night = d.perNightPP {
                 InfoRow(label: "Per night", value: "\(Fmt.usd(night)) pp")
             }
-            if let usual = d.usualPP {
-                InfoRow(label: "Usually", value: "\(Fmt.usd(usual)) pp")
+            if let typical = deal.typicalPP {
+                InfoRow(label: "Typical", value: "\(Fmt.usd(typical)) pp")
             }
             if let lowest = d.lowestSeenPP {
                 InfoRow(label: "Lowest seen", value: "\(Fmt.usd(lowest)) pp")
             }
             if let previous = d.previousPP {
                 InfoRow(label: "Was", value: "\(Fmt.usd(previous)) pp",
-                        note: deal.dropPP.map { "down \(Fmt.usd($0)) pp" },
-                        valueColor: nil)
+                        note: deal.dropPP.map { "down \(Fmt.usd($0)) pp" })
             }
         }
     }
@@ -151,6 +221,32 @@ private struct DealDetailContent: View {
         case true?: return "taxes included"
         case false?: return "plus taxes"
         case nil: return nil
+        }
+    }
+
+    /// Fits My Trip, or the reasons it doesn't, worked out live from the trip settings.
+    private var tripFitSection: some View {
+        let fit = store.fit(deal)
+        return Section("Your trip") {
+            if fit.fits {
+                Label("Fits your trip", systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(Palette.fits)
+                    .font(.body.weight(.semibold))
+                if let tradeoff = fit.tradeoff {
+                    Text(tradeoff)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Label("Not for this trip", systemImage: "suitcase")
+                    .foregroundStyle(Palette.call)
+                    .font(.body.weight(.semibold))
+                if !fit.reasons.isEmpty {
+                    Text(fit.reasons.joined(separator: " · "))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
@@ -187,7 +283,7 @@ private struct DealDetailContent: View {
         }
     }
 
-    // MARK: Cabin and trip
+    // MARK: Cabin
 
     @ViewBuilder
     private var cabinSection: some View {
@@ -208,27 +304,90 @@ private struct DealDetailContent: View {
         }
     }
 
-    private var tripSection: some View {
-        Section("Trip") {
-            if let range = deal.dateRange {
-                InfoRow(label: "Dates", value: range, note: d.nights.map { Fmt.nights($0) })
+    /// Every category the sources list, with its price; the one this deal is about is marked.
+    @ViewBuilder
+    private var cabinOptionsSection: some View {
+        let options = (d.cabinOptions ?? []).filter { ($0.category ?? "").isEmpty == false }
+        if !options.isEmpty {
+            Section("Cabin options") {
+                ForEach(Array(options.enumerated()), id: \.offset) { item in
+                    if item.offset == 0 {
+                        CabinOptionRow(option: item.element, current: isCurrent(item.element))
+                            .id(DetailFocus.cabins)
+                    } else {
+                        CabinOptionRow(option: item.element, current: isCurrent(item.element))
+                    }
+                }
             }
-            if let region = d.region, !region.isEmpty {
-                InfoRow(label: "Region", value: region)
+        }
+    }
+
+    private func isCurrent(_ option: CabinOption) -> Bool {
+        guard let price = option.pricePP, price == d.pricePP else { return false }
+        if let name = d.cabinName, let category = option.category {
+            return name.caseInsensitiveCompare(category) == .orderedSame
+        }
+        return option.type == d.cabin
+    }
+
+    // MARK: Itinerary
+
+    private var itinerarySection: some View {
+        Section("Itinerary") {
+            if let dates = deal.dates {
+                InfoRow(label: "Dates", value: dates, note: d.nights.map { Fmt.nights($0) })
+                    .id(DetailFocus.itinerary)
             }
             if let port = d.port, !port.isEmpty {
                 InfoRow(label: "Leaves from", value: port, note: d.roundTrip == true ? "round trip" : nil)
             }
-            if let stops = d.ports, !stops.isEmpty {
-                InfoRow(label: "Stops", value: stops.joined(separator: "\n"))
+            let days = (d.itineraryDays ?? []).filter { ($0.port ?? "").isEmpty == false }
+            if !days.isEmpty {
+                ForEach(Array(days.enumerated()), id: \.offset) { item in
+                    ItineraryRow(day: item.element, fallbackDay: item.offset + 1)
+                }
+            } else if let route = deal.route {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Route").foregroundStyle(.secondary)
+                    Text(route)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+            }
+            if let region = d.region, !region.isEmpty {
+                InfoRow(label: "Region", value: region)
             }
             if let flight = d.flight, !flight.isEmpty {
                 InfoRow(label: "Flight", value: flight)
             }
-            if let shipClass = d.shipClass, shipClass != "other" {
-                InfoRow(label: "Ship class", value: shipClass.capitalized)
+            if let shipClass = deal.shipClass, shipClass != .other {
+                InfoRow(label: "Ship class", value: shipClass.short)
             }
         }
+    }
+
+    // MARK: Price history
+
+    @ViewBuilder
+    private var historySection: some View {
+        let points = historyPoints
+        if points.count >= 2 {
+            Section("Price history") {
+                PriceHistoryChart(points: points)
+                    .padding(.vertical, 6)
+                    .id(DetailFocus.history)
+            }
+        }
+    }
+
+    /// This deal's history, for its own cabin type when the rows say which.
+    private var historyPoints: [PricePoint] {
+        let all = store.history[deal.id] ?? []
+        if let cabin = d.cabin {
+            let same = all.filter { $0.cabin == nil || $0.cabin == cabin }
+            if same.count >= 2 { return same }
+        }
+        return all
     }
 
     // MARK: Perks and deadlines
@@ -326,13 +485,191 @@ private struct DealDetailContent: View {
 
     private var shareText: String {
         var parts = [deal.title]
-        if !deal.tripLine.isEmpty { parts.append(deal.tripLine) }
+        if !deal.datesLine.isEmpty { parts.append(deal.datesLine) }
+        if let route = deal.route { parts.append(route) }
         if let total = d.totalFor3 {
             parts.append("\(Fmt.usd(total)) for 3")
         } else if let pp = d.pricePP, pp > 0 {
             parts.append("\(Fmt.usd(pp)) pp")
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// One cabin category: name and where it's from on the left, the price per person on the right.
+private struct CabinOptionRow: View {
+    let option: CabinOption
+    let current: Bool
+
+    private var detail: String {
+        var parts: [String] = []
+        if let type = option.type.flatMap({ CabinType(rawValue: $0) }) { parts.append(type.title) }
+        if let source = option.source, !source.isEmpty { parts.append(source) }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(option.category ?? "")
+                        .fontWeight(current ? .semibold : .regular)
+                    if current {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(Palette.accent)
+                            .accessibilityLabel(Text("this deal"))
+                    }
+                }
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 8)
+            if let price = option.pricePP {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(Fmt.usd(price)) pp")
+                        .monospacedDigit()
+                        .fontWeight(current ? .semibold : .regular)
+                    if let taxes = option.taxesIncluded {
+                        Text(taxes ? "taxes in" : "plus taxes")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// "Day 2 · Mon Sep 6" / "Cozumel" / "8:00 AM – 5:00 PM".
+private struct ItineraryRow: View {
+    let day: ItineraryDay
+    let fallbackDay: Int
+
+    private var when: String {
+        var parts = ["Day \(day.day ?? fallbackDay)"]
+        if let date = Fmt.day(day.date) { parts.append(Fmt.weekday(date)) }
+        return parts.joined(separator: " · ")
+    }
+
+    private var hours: String? {
+        let arrive = day.arrive?.trimmed ?? ""
+        let depart = day.depart?.trimmed ?? ""
+        switch (arrive.isEmpty, depart.isEmpty) {
+        case (false, false): return "\(arrive) – \(depart)"
+        case (true, false): return "Departs \(depart)"
+        case (false, true): return "Arrives \(arrive)"
+        case (true, true): return nil
+        }
+    }
+
+    var body: some View {
+        let port = day.port ?? ""
+        let atSea = Deal.isSeaDay(port)
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(when)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                Text(port)
+                    .foregroundStyle(atSea ? Color.secondary : Color.primary)
+            }
+            Spacer(minLength: 8)
+            if let hours {
+                Text(hours)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .multilineTextAlignment(.trailing)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The price over time as a quiet line, the lowest point marked, with the first, lowest and latest prices below.
+struct PriceHistoryChart: View {
+    let points: [PricePoint]
+
+    private var prices: [Int] { points.map { $0.pricePP } }
+
+    var body: some View {
+        let low = prices.min() ?? 0
+        let high = prices.max() ?? 0
+        let first = points.first
+        let last = points.last
+        VStack(alignment: .leading, spacing: 8) {
+            Sparkline(values: prices)
+                .frame(height: 64)
+            HStack(alignment: .firstTextBaseline) {
+                if let first {
+                    column("First seen", Fmt.usd(first.pricePP), first.seen.map { Fmt.shortDay($0) })
+                }
+                Spacer(minLength: 8)
+                column("Lowest", Fmt.usd(low), nil)
+                Spacer(minLength: 8)
+                if let last {
+                    column("Latest", Fmt.usd(last.pricePP), last.seen.map { Fmt.shortDay($0) })
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(spoken(low: low, high: high)))
+    }
+
+    private func column(_ label: String, _ value: String, _ note: String?) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.subheadline.weight(.semibold)).monospacedDigit()
+            if let note {
+                Text(note).font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+            }
+        }
+    }
+
+    private func spoken(low: Int, high: Int) -> String {
+        let first = points.first.map { Fmt.usd($0.pricePP) } ?? ""
+        let last = points.last.map { Fmt.usd($0.pricePP) } ?? ""
+        return "Price history, \(points.count) prices: from \(first) to \(last), lowest \(Fmt.usd(low)), highest \(Fmt.usd(high))"
+    }
+}
+
+/// A line through the values, scaled to fit, with the lowest point and the latest point as dots.
+private struct Sparkline: View {
+    let values: [Int]
+
+    var body: some View {
+        Canvas { context, size in
+            guard values.count >= 2, let lo = values.min(), let hi = values.max() else { return }
+            let span = Double(max(hi - lo, 1))
+            let inset: CGFloat = 6
+            let w = max(size.width - inset * 2, 1)
+            let h = max(size.height - inset * 2, 1)
+            func point(_ i: Int) -> CGPoint {
+                let x = inset + w * CGFloat(i) / CGFloat(values.count - 1)
+                let y = inset + h * CGFloat(1 - Double(values[i] - lo) / span)
+                return CGPoint(x: x, y: y)
+            }
+            var line = Path()
+            line.move(to: point(0))
+            for i in 1..<values.count { line.addLine(to: point(i)) }
+            context.stroke(line, with: .color(Palette.accent),
+                           style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            if let lowIndex = values.firstIndex(of: lo) {
+                let p = point(lowIndex)
+                context.fill(Path(ellipseIn: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)),
+                             with: .color(Palette.fits))
+            }
+            let end = point(values.count - 1)
+            context.fill(Path(ellipseIn: CGRect(x: end.x - 4.5, y: end.y - 4.5, width: 9, height: 9)),
+                         with: .color(Palette.accent))
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -367,8 +704,8 @@ private struct SourceRow: View {
     }
 }
 
-/// The detail view's hero: the kind's deep gradient with slow swells, the ship name large, and the glance
-/// numbers in white. Nothing here that the row does not already say.
+/// The detail view's hero: the kind's deep gradient with slow swells, the ship name large, and the dates, route
+/// and money in white. Nothing here that the card does not already say.
 struct DealHero: View {
     let deal: Deal
 
@@ -378,13 +715,14 @@ struct DealHero: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    if let kind = deal.kind {
+                    if let kind = deal.kind, kind == .drop || kind == .sale {
                         KindPill(kind: kind, onColor: true)
                     }
-                    if deal.kind == .call, let breaks = d.breaks, !breaks.isEmpty {
-                        Text("Breaks: \(breaks)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.white.opacity(0.92))
+                    if deal.kind != .sale, let shipClass = deal.shipClass {
+                        Text(shipClass.title.uppercased())
+                            .font(.system(.caption2, design: .rounded, weight: .bold))
+                            .tracking(0.6)
+                            .foregroundStyle(Color.white.opacity(0.85))
                     }
                 }
                 Spacer(minLength: 8)
@@ -407,10 +745,17 @@ struct DealHero: View {
                             .foregroundStyle(Color.white)
                     }
                 } else {
-                    if !deal.tripLine.isEmpty {
-                        Text(deal.tripLine)
+                    if !deal.datesLine.isEmpty {
+                        Text(deal.datesLine)
                             .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Color.white.opacity(0.92))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.white.opacity(0.95))
+                    }
+                    if let route = deal.route {
+                        Text(route)
+                            .font(.subheadline)
+                            .foregroundStyle(Color.white.opacity(0.85))
+                            .lineLimit(3)
                     }
                     MoneyLine(deal: deal, onColor: true)
                         .padding(.top, 2)
@@ -451,6 +796,7 @@ private struct ScrolledPast: ViewModifier {
         DealDetailView(dealId: "sample-fits")
     }
     .environmentObject(Store.preview())
+    .environmentObject(Router())
 }
 
 #Preview("Sale detail") {
@@ -458,4 +804,5 @@ private struct ScrolledPast: ViewModifier {
         DealDetailView(dealId: "sample-sale")
     }
     .environmentObject(Store.preview())
+    .environmentObject(Router())
 }
