@@ -101,6 +101,8 @@ struct SettingsView: View {
                      : "Any cruise line, tracking and per-line coverage switch on by themselves once the deal server's next update lands.")
             }
 
+            bookingSection
+
             Section {
                 InfoRow(label: "Deals on this phone", value: String(store.cachedDealCount))
                 if store.isV3 {
@@ -151,10 +153,37 @@ struct SettingsView: View {
 
     private var levelText: String {
         switch store.level {
-        case .v3: return "Lines and tracking on"
+        case .v3: return store.v4Features.isEmpty ? "Lines and tracking on" : "Lines, tracking, booking and search on"
         case .v2: return "Tracking coming soon"
         case .unknown: return "Checking…"
         }
+    }
+
+    /// v4 (CONTRACT_V4 section 1.7): where the Book button goes. It is always the sailing's own line; with best
+    /// value, the cheapest known agency for that cabin is also listed under it.
+    @ViewBuilder
+    private var bookingSection: some View {
+        if store.has(.booking) {
+            Section {
+                Picker("Book through", selection: bookingBinding) {
+                    ForEach(BookingPreference.allCases) { option in
+                        Text(option.title).tag(option)
+                    }
+                }
+                .disabled(store.trip == nil)
+            } header: {
+                Text("Booking")
+            } footer: {
+                Text(store.trip == nil
+                     ? "Save My Trip first; this setting lives with it."
+                     : BookingPreference(raw: store.trip?.bookingPreference).detail + " The Book button opens Safari, so your own sign-in on the line's site applies.")
+            }
+        }
+    }
+
+    private var bookingBinding: Binding<BookingPreference> {
+        Binding(get: { BookingPreference(raw: store.trip?.bookingPreference) },
+                set: { store.setBookingPreference($0) })
     }
 
     private var alertsText: String {

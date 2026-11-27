@@ -20,6 +20,9 @@ struct DealsView: View {
     @State private var showFilters = false
     @State private var showTrip = false
     @State private var answering: AnswerTarget?
+    // v4
+    @State private var showDigest = false
+    @State private var showSearch = false
 
     init(bucket: DealBucket = .best) {
         _bucket = State(initialValue: bucket)
@@ -40,6 +43,13 @@ struct DealsView: View {
         NavigationStack(path: $router.dealsPath) {
             List {
                 Section {
+                    if !store.digestItems.isEmpty {
+                        // v4: the newsletters, folded into one list; it opens only when tapped.
+                        DigestCard(newCount: store.digestNewCount, total: store.digestItems.count) { showDigest = true }
+                            .listRowInsets(EdgeInsets(top: 6, leading: CardList.gutter, bottom: 4, trailing: CardList.gutter))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                     DealsHeader(status: store.status, syncing: store.syncing) { showStatus = true }
                         .listRowInsets(EdgeInsets(top: 4, leading: CardList.gutter, bottom: 4, trailing: CardList.gutter))
                         .listRowBackground(Color.clear)
@@ -109,6 +119,12 @@ struct DealsView: View {
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
+                        showSearch = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .accessibilityLabel(Text("Search every sailing"))
+                    Button {
                         showFilters = true
                     } label: {
                         Image(systemName: filters.isActive ? "line.3.horizontal.decrease.circle.fill"
@@ -152,20 +168,58 @@ struct DealsView: View {
             .sheet(item: $answering) { target in
                 AnswerSheet(deal: target.deal, verdict: target.verdict, existing: nil)
             }
+            .sheet(isPresented: $showDigest, onDismiss: { store.markDigestSeen() }) {
+                DigestSheet()
+            }
+            .sheet(isPresented: $showSearch) {
+                SearchView()
+            }
         }
     }
 
     // MARK: Cards
 
+    /// The card: as before, or (v4) with the Book bar and the soft port note inside it. The card itself opens the
+    /// details; only the Book bar opens a site.
+    @ViewBuilder
+    private func cardBody(_ deal: Deal, note: FitNote?) -> some View {
+        let book = store.has(.booking) ? store.bookChoice(for: deal) : BookChoice()
+        let port = store.portFit(deal)
+        if book.isEmpty && port == nil {
+            Button {
+                router.dealsPath.append(deal.id)
+            } label: {
+                DealCard(deal: deal, note: note)
+            }
+            .buttonStyle(CardPressStyle())
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                Button {
+                    router.dealsPath.append(deal.id)
+                } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        DealRow(deal: deal, note: note)
+                        if let port {
+                            PortFitCaption(fit: port)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                BookBar(choice: book)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(CardBackground(highlight: deal.isExceptional))
+        }
+    }
+
     private func card(_ deal: Deal) -> some View {
         let fit = store.fit(deal)
         let note = bucket == .best ? FitNote.best(fit) : FitNote.trip(fit)
-        return Button {
-            router.dealsPath.append(deal.id)
-        } label: {
-            DealCard(deal: deal, note: note)
-        }
-        .buttonStyle(CardPressStyle())
+        return cardBody(deal, note: note)
         .cardRow()
         .accessibilityHint(Text("Opens the details"))
         .swipeActions(edge: .leading, allowsFullSwipe: true) {

@@ -6,11 +6,40 @@ import SwiftUI
 struct TrackingView: View {
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var router: Router
+    /// v4: the tab also holds My trips (the cruises already taken), one tap away.
+    @State private var side: TrackingSide
+    @State private var tripEditor: TripEditorTarget?
+    @State private var portShown: PortSummary?
+
+    private static let sideKey = "trackingSide"
+
+    /// Opens on the side last shown, or the one given (previews and screenshots).
+    init(side: TrackingSide? = nil) {
+        let saved = TrackingSide(rawValue: UserDefaults.standard.string(forKey: TrackingView.sideKey) ?? "")
+        _side = State(initialValue: side ?? saved ?? .tracking)
+    }
+
+    private var showsTrips: Bool { store.isV3 && side == .trips }
 
     var body: some View {
         NavigationStack(path: $router.trackingPath) {
             List {
-                if !store.isV3 {
+                if store.isV3 {
+                    Section {
+                        Picker("Show", selection: $side.animation(Motion.snappy)) {
+                            Text("Tracking  \(store.tracked.count)").tag(TrackingSide.tracking)
+                            Text("My trips  \(store.trips.count)").tag(TrackingSide.trips)
+                        }
+                        .pickerStyle(.segmented)
+                        .listRowInsets(EdgeInsets(top: 6, leading: CardList.gutter, bottom: 4, trailing: CardList.gutter))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
+                    .listSectionSeparator(.hidden)
+                }
+                if showsTrips {
+                    MyTripsSections(editor: $tripEditor, port: $portShown)
+                } else if !store.isV3 {
                     Section {
                         comingSoon
                             .listRowBackground(Color.clear)
@@ -42,9 +71,19 @@ struct TrackingView: View {
                 }
             }
             .cardList()
-            .navigationTitle("Tracking")
+            .navigationTitle(showsTrips ? "My trips" : "Tracking")
             .toolbar {
-                if store.isV3 {
+                if showsTrips && store.has(.trips) {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            tripEditor = .new
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .accessibilityLabel(Text("Add a trip"))
+                        .disabled(store.trips.count >= Store.tripsLimit)
+                    }
+                } else if store.isV3 && !showsTrips {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             Button {
@@ -71,6 +110,15 @@ struct TrackingView: View {
             .navigationDestination(for: String.self) { id in
                 TrackedDetailView(trackedId: id)
             }
+            .onChange(of: side) { _, value in
+                UserDefaults.standard.set(value.rawValue, forKey: TrackingView.sideKey)
+            }
+            .sheet(item: $tripEditor) { target in
+                PastTripEditor(target: target)
+            }
+            .sheet(item: $portShown) { port in
+                PortDetailView(port: port)
+            }
         }
     }
 
@@ -79,13 +127,37 @@ struct TrackingView: View {
         return "\(count) of \(Store.trackedLimit) · prices fill in from Deal Desk's fare data, never guessed · swipe left to stop tracking"
     }
 
-    private func card(_ item: TrackedSailing) -> some View {
-        Button {
-            router.trackingPath.append(item.id)
-        } label: {
-            TrackedCard(item: item)
+    @ViewBuilder
+    private func cardBody(_ item: TrackedSailing) -> some View {
+        let book = store.bookChoice(for: item)
+        if book.isEmpty {
+            Button {
+                router.trackingPath.append(item.id)
+            } label: {
+                TrackedCard(item: item)
+            }
+            .buttonStyle(CardPressStyle())
+        } else {
+            // v4: the card opens the details; the Book bar under it opens the line's own site.
+            VStack(alignment: .leading, spacing: 10) {
+                Button {
+                    router.trackingPath.append(item.id)
+                } label: {
+                    TrackedCard(item: item, framed: false)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                BookBar(choice: book)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(CardBackground())
         }
-        .buttonStyle(CardPressStyle())
+    }
+
+    private func card(_ item: TrackedSailing) -> some View {
+        cardBody(item)
         .cardRow()
         .accessibilityHint(Text("Opens the details"))
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -131,6 +203,8 @@ struct TrackingView: View {
 ///     ~~~~~~~~~~~~~~~~                11% under typical
 struct TrackedCard: View {
     let item: TrackedSailing
+    /// false when the caller draws the card around it (with the Book bar inside).
+    var framed = true
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -165,11 +239,7 @@ struct TrackedCard: View {
                 .padding(.top, 2)
             trend
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(CardBackground())
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .modifier(CardFrame(on: framed))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(Speech.tracked(item)))
     }
@@ -208,6 +278,30 @@ struct TrackedCard: View {
                 .monospacedDigit()
         }
     }
+}
+
+/// The card's own padding and background, unless the caller frames it.
+struct CardFrame: ViewModifier {
+    let on: Bool
+
+    func body(content: Content) -> some View {
+        if on {
+            content
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(CardBackground())
+                .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        } else {
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// Which side of the Tracking tab shows: sailings to come, or the cruises already taken.
+enum TrackingSide: String {
+    case tracking, trips
 }
 
 /// "$1,312 pp now" large, then "typical $1,480 · lowest $1,248" small; "filling…" wherever a value isn't in.

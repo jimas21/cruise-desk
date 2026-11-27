@@ -44,6 +44,12 @@ struct TripPrefs: Decodable, Equatable {
     var minScore: Int? = nil
     var sailMonths: [Int] = []
     var refreshMinutes: Int = 30
+    // v4 (CONTRACT_V4 sections 1.7 and 4.2). Sent only when the server lists the feature (booking, trips); a PATCH
+    // without them leaves the server's values alone. nil means absent (the server's default applies).
+    var bookingPreference: String? = nil
+    var portRecencyMonths: Int? = nil
+    var portRecencyFadeMonths: Int? = nil
+    var usePortRatings: Bool? = nil
 
     /// Balcony kinds My Trip can rule out (the ids the server stores, and how they read).
     static let balconyKinds: [(id: String, title: String)] = [
@@ -56,6 +62,7 @@ struct TripPrefs: Decodable, Equatable {
         case homeAirport, portsPreferred, portsExcluded, regions, dateFrom, dateTo, avoidHolidays, mustSeeMinScore
         case alertForMyTrip, alertMustSee, quietHoursStart, quietHoursEnd, notes, updatedAt
         case lines, shipSizes, dealTypes, minPctUnder, minScore, sailMonths, refreshMinutes
+        case bookingPreference, portRecencyMonths, portRecencyFadeMonths, usePortRatings
     }
 
     init() {}
@@ -104,7 +111,17 @@ struct TripPrefs: Decodable, Equatable {
         minScore = maybe(.minScore, Int.self)
         sailMonths = value(.sailMonths, base.sailMonths)
         refreshMinutes = value(.refreshMinutes, base.refreshMinutes)
+        bookingPreference = maybe(.bookingPreference, String.self)
+        portRecencyMonths = maybe(.portRecencyMonths, Int.self)
+        portRecencyFadeMonths = maybe(.portRecencyFadeMonths, Int.self)
+        usePortRatings = maybe(.usePortRatings, Bool.self)
     }
+
+    /// Ports visited within this many months count a little less (0 turns it off); the server's default is 6.
+    var recencyMonths: Int { portRecencyMonths ?? 6 }
+    /// ... fading to nothing by this many months; the server's default is 12.
+    var fadeMonths: Int { max(portRecencyFadeMonths ?? 12, recencyMonths, 1) }
+    var usesPortRatings: Bool { usePortRatings ?? true }
 
     var party: Int { max(adults + children, 1) }
 
@@ -191,13 +208,18 @@ struct TripPrefs: Decodable, Equatable {
         for month in sailMonths where (1...12).contains(month) && !months.contains(month) { months.append(month) }
         p.sailMonths = months.sorted()
         p.refreshMinutes = [15, 30, 60].contains(refreshMinutes) ? refreshMinutes : 30
+        if let pref = bookingPreference { p.bookingPreference = BookingPreference(raw: pref).rawValue }
+        if let months = portRecencyMonths { p.portRecencyMonths = min(max(months, 0), 24) }
+        if let fade = portRecencyFadeMonths {
+            p.portRecencyFadeMonths = min(max(fade, 1, p.portRecencyMonths ?? 6), 36)
+        }
         return p
     }
 
     /// Every field as the server stores it. Unset optional fields are sent as `null`, so a save replaces the
     /// whole document (PATCH removes a field that is `null`; a first PUT simply leaves it out). The v3 fields go
     /// only to a v3 server (`v3`); an older one would refuse them, and its PATCH leaves them alone.
-    func fields(stamp: String = Fmt.stamp(), v3: Bool = false) -> [String: JSONValue] {
+    func fields(stamp: String = Fmt.stamp(), v3: Bool = false, v4: Set<V4Feature> = []) -> [String: JSONValue] {
         func strings(_ items: [String]) -> JSONValue { .array(items.map { JSONValue.string($0) }) }
         func text(_ value: String?) -> JSONValue { value.map { JSONValue.string($0) } ?? .null }
         func number(_ value: Int?) -> JSONValue { value.map { JSONValue.int($0) } ?? .null }
@@ -239,6 +261,15 @@ struct TripPrefs: Decodable, Equatable {
             f["minScore"] = number(minScore)
             f["sailMonths"] = .array(sailMonths.map { JSONValue.int($0) })
             f["refreshMinutes"] = .int(refreshMinutes)
+        }
+        // v4: only the knobs whose feature the server lists, and only when they have a value.
+        if v4.contains(.booking), let pref = bookingPreference {
+            f["bookingPreference"] = .string(BookingPreference(raw: pref).rawValue)
+        }
+        if v4.contains(.trips) {
+            if let months = portRecencyMonths { f["portRecencyMonths"] = .int(months) }
+            if let fade = portRecencyFadeMonths { f["portRecencyFadeMonths"] = .int(fade) }
+            if let use = usePortRatings { f["usePortRatings"] = .bool(use) }
         }
         return f
     }
@@ -508,10 +539,26 @@ enum ScoreFloor {
 
 enum DealOrder {
     /// Best score sorts by score, then the lowest total ("ranked by value"), then newest.
-    static func sorted(_ deals: [Deal], by sort: DealSort, preferred: (Deal) -> Bool = { _ in false }) -> [Deal] {
-        deals.sorted { a, b in
+    ///
+    /// v4 with port fit (`fitAdj`, CONTRACT_V4 section 4.3): price-qualifying deals first (a new low, under typical
+    /// or a drop), then score + fit, then score. So a qualifying deal always outranks one that isn't, and fit moves
+    /// a deal at most 15 points among its peers; it never hides one.
+    static func sorted(_ deals: [Deal], by sort: DealSort, preferred: (Deal) -> Bool = { _ in false },
+                       fitAdj: ((Deal) -> Int)? = nil, minPctUnder: Int = 15) -> [Deal] {
+        let adj: [String: Int] = fitAdj.map { fit in
+            Dictionary(deals.map { ($0.id, max(-15, min(15, fit($0)))) }, uniquingKeysWith: { first, _ in first })
+        } ?? [:]
+        func qualifies(_ deal: Deal) -> Int {
+            DealType.of(deal, fits: false, minPctUnder: minPctUnder).isDisjoint(with: DealOrder.priceKinds) ? 0 : 1
+        }
+        return deals.sorted { a, b in
             let steps: [ComparisonResult]
             switch sort {
+            case .score where fitAdj != nil:
+                steps = [desc(qualifies(a), qualifies(b)),
+                         desc((a.data.score ?? 0) + (adj[a.id] ?? 0), (b.data.score ?? 0) + (adj[b.id] ?? 0)),
+                         desc(a.data.score, b.data.score), asc(a.totalEstimate, b.totalEstimate),
+                         desc(preferred(a) ? 1 : 0, preferred(b) ? 1 : 0), desc(stamp(a.latest), stamp(b.latest))]
             case .score:
                 steps = [desc(a.data.score, b.data.score), asc(a.totalEstimate, b.totalEstimate),
                          desc(preferred(a) ? 1 : 0, preferred(b) ? 1 : 0), desc(stamp(a.latest), stamp(b.latest))]
@@ -532,6 +579,9 @@ enum DealOrder {
     }
 
     private static func stamp(_ date: Date) -> Int { Int(date.timeIntervalSince1970) }
+
+    /// The kinds that qualify a deal on price (CONTRACT_V4 section 4.3).
+    static let priceKinds: Set<DealType> = [.newLow, .underTypical, .drop]
 
     /// Smallest first; unknown last.
     static func asc(_ x: Int?, _ y: Int?) -> ComparisonResult {

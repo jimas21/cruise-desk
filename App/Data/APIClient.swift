@@ -114,6 +114,37 @@ struct APIClient {
         return (try? JSONDecoder().decode(SailingsResult.self, from: data))?.sailings ?? []
     }
 
+    // MARK: v4
+
+    /// `GET /v1/search`: sailings the fare sources have seen, filtered and sorted on the server (read-only).
+    func search(_ query: SearchQuery, offset: Int, limit: Int = 50) async throws -> SearchResult {
+        let data = try await call("GET", "/v1/search", query: query.queryItems(offset: offset, limit: limit))
+        guard let value = try? JSONDecoder().decode(SearchResult.self, from: data) else {
+            throw APIError.server("The search came back in a shape this version can't read.")
+        }
+        return value
+    }
+
+    /// `POST /v1/link/parse`: the server reads a line's own link from its text (it never fetches it).
+    func parseLink(_ url: String) async throws -> LinkParse {
+        let data = try await call("POST", "/v1/link/parse", body: .object(["url": .string(url)]))
+        guard let value = try? JSONDecoder().decode(LinkParse.self, from: data) else {
+            throw APIError.server("The link came back in a shape this version can't read.")
+        }
+        return value
+    }
+
+    /// `GET /v1/trips/prefill`: the ports and nights Deal Desk already knows for a past sailing.
+    func prefill(line: String, ship: String, sailDate: String) async throws -> TripPrefill {
+        let query = [URLQueryItem(name: "line", value: line), URLQueryItem(name: "ship", value: ship),
+                     URLQueryItem(name: "sailDate", value: sailDate)]
+        let data = try await call("GET", "/v1/trips/prefill", query: query)
+        guard let value = try? JSONDecoder().decode(TripPrefill.self, from: data) else {
+            throw APIError.server("The trip details came back in a shape this version can't read.")
+        }
+        return value
+    }
+
     func delete(_ coll: String, _ id: String, ifVersion: Int) async throws {
         _ = try await call("DELETE", "/v1/\(coll)/\(id)",
                            query: [URLQueryItem(name: "ifVersion", value: String(ifVersion))])

@@ -163,18 +163,26 @@ struct Deal: Identifiable, Hashable {
     let id: String
     let version: Int
     let data: DealData
+    /// v4: the line's own page for this sailing (built by the server) and any agency that is clearly better.
+    /// Read on their own, so an odd value there never hides the deal.
+    var booking: BookingInfo? = nil
+    var alternatives: [BookAlternative] = []
 
     init?(raw: RawDoc) {
         guard let decoded = raw.data.decode(DealData.self) else { return nil }
         id = raw.id
         version = raw.version
         data = decoded
+        booking = BookingInfo.from(raw.data)
+        alternatives = BookAlternative.from(raw.data)
     }
 
-    init(id: String, data: DealData) {
+    init(id: String, data: DealData, booking: BookingInfo? = nil, alternatives: [BookAlternative] = []) {
         self.id = id
         self.version = 1
         self.data = data
+        self.booking = booking
+        self.alternatives = alternatives
     }
 
     var kind: DealKind? { data.kind.flatMap { DealKind(rawValue: $0) } }

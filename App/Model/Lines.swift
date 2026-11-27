@@ -222,11 +222,17 @@ struct CatalogShip: Codable, Hashable {
     var classSlug: String?
     var size: String?
     var gt: Int?
+    // v4
+    /// The line's own ship code ("IC"), when the catalog has one.
+    var code: String? = nil
+    var passengers: Int? = nil
+    var maidenYear: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case name, slug
         case className = "class"
         case classSlug, size, gt
+        case code, passengers, maidenYear
     }
 
     /// The slug the server matches on (its own, else worked out from the name the same way).
@@ -247,6 +253,36 @@ extension CatalogShip {
         classSlug = c.lenient(String.self, .classSlug)
         size = c.lenient(String.self, .size)
         gt = c.lenient(Int.self, .gt)
+        code = c.lenient(String.self, .code)
+        passengers = c.lenient(Int.self, .passengers)
+        maidenYear = c.lenient(Int.self, .maidenYear)
+    }
+}
+
+/// v4: how a line's own booking pages are reached (`lines[].booking` in `GET /v1/catalog`).
+struct CatalogBooking: Codable, Hashable {
+    struct Tier: Codable, Hashable {
+        var tier: String?
+        var verified: Bool?
+    }
+
+    var label: String?
+    var short: String?
+    var home: String?
+    var tiers: [Tier]?
+
+    enum CodingKeys: String, CodingKey {
+        case label, short, home, tiers
+    }
+}
+
+extension CatalogBooking {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        label = c.lenient(String.self, .label)
+        short = c.lenient(String.self, .short)
+        home = c.lenient(String.self, .home)
+        tiers = c.lenient([Tier].self, .tiers)
     }
 }
 
@@ -258,9 +294,11 @@ struct CatalogLine: Codable, Hashable {
     var liveSources: [String]?
     var sailings: Int?
     var ships: [CatalogShip]?
+    // v4
+    var booking: CatalogBooking? = nil
 
     enum CodingKeys: String, CodingKey {
-        case name, slug, coverage, coverageNote, liveSources, sailings, ships
+        case name, slug, coverage, coverageNote, liveSources, sailings, ships, booking
     }
 
     var coverageState: Coverage? { Coverage(coverage) }
@@ -276,6 +314,7 @@ extension CatalogLine {
         liveSources = c.lenient([String].self, .liveSources)
         sailings = c.lenient(Int.self, .sailings)
         ships = c.lenient([CatalogShip].self, .ships)
+        booking = c.lenient(CatalogBooking.self, .booking)
     }
 }
 
@@ -306,13 +345,20 @@ struct Catalog: Codable, Hashable {
     var generatedAt: String?
     var sizes: [CatalogSize]?
     var lines: [CatalogLine]?
+    // v4
+    var features: [String]? = nil
 
     enum CodingKeys: String, CodingKey {
-        case apiVersion, catalogVersion, generatedAt, sizes, lines
+        case apiVersion, catalogVersion, generatedAt, sizes, lines, features
     }
 
     /// The deal server speaks v3 (lines, tracking, the refresh nudge).
     var isV3: Bool { (apiVersion ?? 0) >= 3 }
+
+    /// A v4 feature is on only when the server says apiVersion 4 or more and lists it (CONTRACT_V4 rule 0.8).
+    func has(_ feature: V4Feature) -> Bool {
+        (apiVersion ?? 0) >= 4 && (features ?? []).contains(feature.rawValue)
+    }
 
     /// Every line name, in the server's order; the built-in names when the server gave none.
     var lineNames: [String] {
@@ -401,6 +447,7 @@ extension Catalog {
         generatedAt = c.lenient(String.self, .generatedAt)
         sizes = c.lenient([CatalogSize].self, .sizes)
         lines = c.lenient([CatalogLine].self, .lines)
+        features = c.lenient([String].self, .features)
     }
 }
 

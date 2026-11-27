@@ -63,6 +63,15 @@ enum RefreshReason: String {
     case open, pull, track
 }
 
+/// What saving a plan or a past trip did (CONTRACT_V4 sections 3.2 and 4.1).
+enum SaveOutcome: Equatable {
+    case saved(String)
+    case already(String)
+    case comingSoon
+    case full
+    case invalid(String)
+}
+
 /// What `Store.track` did with a pick.
 enum TrackOutcome: Equatable {
     case added(String)
@@ -107,6 +116,8 @@ struct CacheFile: Codable {
     var level: String?
     var catalog: Catalog?
     var catalogAt: Date?
+    // v4: features the server listed but whose calls answered 404/405 (off until the next catalog check).
+    var featuresOff: [String]?
 }
 
 /// The app's single source of truth: the on-disk cache merged from `/v1/sync`, with queued writes laid on top.
@@ -116,6 +127,11 @@ final class Store: ObservableObject {
 
     /// The most sailings the server keeps tracked.
     static let trackedLimit = 50
+    /// v4 caps (CONTRACT_V4 sections 3.2 and 4.1).
+    static let plansLimit = 20
+    static let tripsLimit = 100
+    /// Collections whose documents are created with POST (the server picks the id).
+    static let postedColls: Set<String> = ["tracked", "plans", "trips"]
 
     @Published private(set) var deals: [Deal] = []
     @Published private(set) var feedback: [String: Feedback] = [:]
@@ -148,6 +164,18 @@ final class Store: ObservableObject {
     @Published private(set) var nudge: NudgeResult?
     @Published private(set) var nudgedAt: Date?
     @Published private(set) var refreshState: RefreshState?
+    // v4
+    /// The newest newsletter digest (CONTRACT_V4 section 2).
+    @Published private(set) var digest: DigestDoc?
+    /// Digest item ids already shown on this phone.
+    @Published private(set) var digestSeen: Set<String> = []
+    /// Saved searches, newest first.
+    @Published private(set) var plans: [Plan] = []
+    /// Cruises Jim took, newest first.
+    @Published private(set) var trips: [PastTrip] = []
+    /// The server's per-port summary of those trips (ratings, visits, how they nudge picks).
+    @Published private(set) var ports: PortsSummary?
+    @Published private(set) var featuresOff: Set<String> = []
 
     private var dealIndex: [String: Deal] = [:]
     private var cache: CacheFile
@@ -164,7 +192,8 @@ final class Store: ObservableObject {
     private static let queueFile = "queue.json"
     private static let nudgeKey = "refresh.lastNudge"
 
-    init(previewDocs: [String: [String: RawDoc]]? = nil, level previewLevel: ServerLevel = .v3) {
+    init(previewDocs: [String: [String: RawDoc]]? = nil, level previewLevel: ServerLevel = .v3,
+         catalog previewCatalog: Catalog? = nil) {
         if let previewDocs {
             isPreview = true
             cache = CacheFile(serverTime: nil, savedAt: Date(), colls: previewDocs)
@@ -179,10 +208,12 @@ final class Store: ObservableObject {
         lastSync = cache.savedAt
         if isPreview {
             level = previewLevel
-            catalog = previewLevel == .v3 ? Samples.catalog : .builtIn
+            catalog = previewLevel == .v3 ? (previewCatalog ?? Samples.catalog) : .builtIn
         } else {
             level = cache.level.flatMap { ServerLevel(rawValue: $0) } ?? .unknown
             catalog = (level == .v3 ? cache.catalog : nil) ?? .builtIn
+            featuresOff = Set(cache.featuresOff ?? [])
+            digestSeen = DigestSeen.load()
         }
         CatalogIndex.current = catalog
         rebuild()
@@ -191,6 +222,11 @@ final class Store: ObservableObject {
 
     static func preview() -> Store {
         Store(previewDocs: Samples.docs)
+    }
+
+    /// The preview on a v4 server: booking links, the digest, search and plans, past trips and port ratings.
+    static func previewV4() -> Store {
+        Store(previewDocs: Samples.docsV4, catalog: Samples.catalogV4)
     }
 
     // MARK: - What the screens read
@@ -203,6 +239,19 @@ final class Store: ObservableObject {
 
     /// The deal server has v3: lines, tracking, coverage, the refresh nudge.
     var isV3: Bool { level == .v3 }
+
+    /// A v4 feature is on: the server says apiVersion 4+ and lists it, and its calls have not answered 404/405.
+    func has(_ feature: V4Feature) -> Bool {
+        isV3 && catalog.has(feature) && !featuresOff.contains(feature.rawValue)
+    }
+
+    var v4Features: Set<V4Feature> { Set(V4Feature.allCases.filter { has($0) }) }
+
+    private func turnOff(_ feature: V4Feature) {
+        featuresOff.insert(feature.rawValue)
+        cache.featuresOff = Array(featuresOff).sorted()
+        saveCache()
+    }
 
     func deal(_ id: String) -> Deal? { dealIndex[id] }
 
@@ -240,7 +289,65 @@ final class Store: ObservableObject {
         case .trip:
             list = list.filter { fit($0).fits && ScoreFloor.passes($0, floor) }
         }
-        return DealOrder.sorted(list, by: sort, preferred: { self.fit($0).preferred })
+        let fitAdj: ((Deal) -> Int)? = fitOrdering ? { self.portFit($0)?.adj ?? 0 } : nil
+        return DealOrder.sorted(list, by: sort, preferred: { self.fit($0).preferred }, fitAdj: fitAdj,
+                                minPctUnder: minPct)
+    }
+
+    // MARK: - v4: booking, fit, digest (CONTRACT_V4 sections 1.6, 1.7, 2 and 4.3)
+
+    /// The Book button for a deal: the line's own page (v4), else the deal's own link as before.
+    func bookChoice(for deal: Deal) -> BookChoice {
+        BookChoice.make(line: deal.line, ship: deal.data.ship, booking: deal.booking, link: deal.data.link,
+                        linkLabel: deal.data.linkLabel, sources: deal.data.sources ?? [], pricePP: deal.data.pricePP,
+                        alternatives: deal.alternatives, v4: has(.booking), isSale: deal.kind == .sale, catalog: catalog)
+    }
+
+    /// The Book button for a tracked sailing (v4 only; a v3 tracked sailing keeps its own buttons).
+    func bookChoice(for item: TrackedSailing) -> BookChoice {
+        guard has(.booking), item.state != .sailed else { return BookChoice() }
+        return BookChoice.make(line: item.line, ship: item.data.ship, booking: item.booking, link: nil, linkLabel: nil,
+                               sources: item.data.sources ?? [], pricePP: item.data.pricePP,
+                               alternatives: item.alternatives, v4: true, catalog: catalog)
+    }
+
+    /// The Book button for a search result.
+    func bookChoice(for row: SearchRow) -> BookChoice {
+        BookChoice.make(line: row.lineName, ship: row.shipTitle, booking: row.booking, link: nil, linkLabel: nil,
+                        sources: row.sources ?? [], pricePP: row.pricePP, alternatives: row.bookAlternatives ?? [],
+                        v4: true, catalog: catalog)
+    }
+
+    /// A digest item's Book button, only when it names a sailing the server could build a link for.
+    func bookChoice(for item: DigestItem) -> BookChoice? {
+        guard has(.booking), let booking = item.booking else { return nil }
+        return BookChoice.make(line: CruiseLine.resolved(item.line), ship: item.ship, booking: booking, link: nil,
+                               linkLabel: nil, sources: [], pricePP: nil, alternatives: [], v4: true, catalog: catalog)
+    }
+
+    /// How Jim's own port history nudges a deal (soft: wording and order only, never a filter).
+    func portFit(_ deal: Deal) -> PortFit? {
+        guard has(.trips), let ports, deal.kind != .sale else { return nil }
+        let stops = deal.data.stops ?? deal.data.ports ?? []
+        return PortFit.of(stops: stops, embark: deal.data.port, returnPort: deal.returnPort, summary: ports)
+    }
+
+    /// Fit takes part in the board's order once there is something to nudge with.
+    var fitOrdering: Bool {
+        guard has(.trips), let ports else { return false }
+        return ports.ports.contains { ($0.adj ?? 0) != 0 }
+    }
+
+    var digestItems: [DigestItem] { has(.digest) ? (digest?.items ?? []) : [] }
+    var digestNewCount: Int { DigestSeen.newCount(digestItems, seen: digestSeen) }
+    func isNew(_ item: DigestItem) -> Bool { !digestSeen.contains(item.id) }
+
+    /// Everything in the digest now counts as seen (when its sheet closes).
+    func markDigestSeen() {
+        let ids = digestItems.map { $0.id }
+        guard !ids.isEmpty, !Set(ids).isSubset(of: digestSeen) else { return }
+        digestSeen.formUnion(ids)
+        if !isPreview { DigestSeen.save(digestSeen, newest: ids) }
     }
 
     // MARK: - Questions
@@ -358,6 +465,197 @@ final class Store: ObservableObject {
         .sorted { ($0.sailDate ?? "") < ($1.sailDate ?? "") }
     }
 
+    // MARK: - v4: search, link reading, prefill
+
+    /// `GET /v1/search`. A 404 or 405 means this server has no search after all: the feature turns off.
+    func search(_ query: SearchQuery, offset: Int = 0) async throws -> SearchResult {
+        if isPreview { return Samples.searchResult }
+        guard let client = Connection.client() else { throw APIError.notConfigured }
+        do {
+            return try await client.search(query, offset: offset)
+        } catch APIError.notFound {
+            turnOff(.search)
+            throw APIError.unsupported
+        } catch APIError.unsupported {
+            turnOff(.search)
+            throw APIError.unsupported
+        }
+    }
+
+    /// The deal server's reading of a cruise line's own link (from its text; nothing is fetched).
+    func parseLink(_ url: String) async -> LinkParse? {
+        guard has(.booking), !isPreview, let client = Connection.client() else { return nil }
+        return try? await client.parseLink(url)
+    }
+
+    /// What Deal Desk already knows about a past sailing: its ports and nights, for Jim to confirm.
+    func prefill(line: String, ship: String, sailDate: Date) async -> TripPrefill? {
+        guard has(.trips), !ship.trimmed.isEmpty else { return nil }
+        if isPreview { return Samples.prefill }
+        guard let client = Connection.client() else { return nil }
+        return try? await client.prefill(line: line, ship: ship.trimmed, sailDate: Fmt.isoDay(sailDate))
+    }
+
+    // MARK: - v4: plans (CONTRACT_V4 section 3.2)
+
+    func plan(_ id: String) -> Plan? { plans.first { $0.id == id } }
+
+    /// Saves a new plan (POST) or changes one (PATCH). Shows at once; queued offline like a tracked sailing.
+    @discardableResult
+    func savePlan(_ draft: PlanDraft, editing: Plan? = nil) -> SaveOutcome {
+        guard has(.plans) else { return .comingSoon }
+        if let problem = draft.problem { return .invalid(problem) }
+        if let clash = plans.first(where: { $0.id != editing?.id && $0.name.lowercased() == draft.key }) {
+            return editing == nil ? .already(clash.id) : .invalid("Another plan is called that.")
+        }
+        if let editing {
+            if !replaceQueuedCreate("plans", editing.id, with: draft.fields(isNew: true)) {
+                enqueue(.upsert, "plans", editing.id, draft.fields(isNew: false))
+            }
+            Haptics.success()
+            return .saved(editing.id)
+        }
+        guard plans.count < Store.plansLimit else { return .full }
+        let id = Store.newId(prefix: "local")
+        enqueue(.create, "plans", id, draft.fields(isNew: true))
+        Haptics.success()
+        return .saved(id)
+    }
+
+    func deletePlan(_ plan: Plan) {
+        guard has(.plans) else { return }
+        removePosted("plans", plan.id, isLocal: plan.isLocal)
+    }
+
+    /// Promote to my trip: My Trip takes the plan's lines, sizes, dates, months, nights, cabin and deal kinds;
+    /// ships, ports, regions and the budget per person are not copied.
+    func promote(_ plan: Plan) {
+        guard has(.plans) else { return }
+        saveTrip(PlanPromotion.apply(plan, to: trip ?? TripPrefs()))
+        let stamp = JSONValue.string(Fmt.stamp())
+        if !replaceQueuedField("plans", plan.id, ["promotedAt": stamp]) {
+            enqueue(.upsert, "plans", plan.id, ["promotedAt": stamp, "updatedAt": stamp])
+        }
+    }
+
+    // MARK: - v4: my past trips (CONTRACT_V4 section 4)
+
+    func pastTrip(_ id: String) -> PastTrip? { trips.first { $0.id == id } }
+
+    private func tripKey(_ trip: PastTrip) -> String {
+        [CruiseLine.slug(trip.line), Slug.ship(trip.data.ship ?? ""), String((trip.data.sailDate ?? "").prefix(10))]
+            .joined(separator: "|")
+    }
+
+    /// Logs a cruise Jim took (POST), or changes one (PATCH). The server works out the port summary from it.
+    @discardableResult
+    func logTrip(_ draft: TripDraft, editing: PastTrip? = nil) -> SaveOutcome {
+        guard has(.trips) else { return .comingSoon }
+        if let problem = draft.problem { return .invalid(problem) }
+        if let clash = trips.first(where: { $0.id != editing?.id && tripKey($0) == draft.key }) {
+            return editing == nil ? .already(clash.id) : .invalid("That sailing is already logged.")
+        }
+        if let editing {
+            if !replaceQueuedCreate("trips", editing.id, with: draft.fields(isNew: true)) {
+                enqueue(.upsert, "trips", editing.id, draft.fields(isNew: false))
+            }
+            Haptics.success()
+            return .saved(editing.id)
+        }
+        guard trips.count < Store.tripsLimit else { return .full }
+        let id = Store.newId(prefix: "local")
+        enqueue(.create, "trips", id, draft.fields(isNew: true))
+        Haptics.success()
+        return .saved(id)
+    }
+
+    func deleteTrip(_ trip: PastTrip) {
+        guard has(.trips) else { return }
+        removePosted("trips", trip.id, isLocal: trip.isLocal)
+    }
+
+    // MARK: - v4: settings that live on the trip settings
+
+    /// Book on the line (default) or best value. Only changes that one field on the trip settings that exist.
+    @discardableResult
+    func setBookingPreference(_ preference: BookingPreference) -> Bool {
+        guard has(.booking) else { return false }
+        return patchTrip(["bookingPreference": .string(preference.rawValue)])
+    }
+
+    /// How recent visits and ratings nudge picks (CONTRACT_V4 section 4.2).
+    @discardableResult
+    func savePortKnobs(recencyMonths: Int, fadeMonths: Int, useRatings: Bool) -> Bool {
+        guard has(.trips) else { return false }
+        let months = min(max(recencyMonths, 0), 24)
+        let fade = min(max(fadeMonths, 1, months), 36)
+        return patchTrip(["portRecencyMonths": .int(months), "portRecencyFadeMonths": .int(fade),
+                          "usePortRatings": .bool(useRatings)])
+    }
+
+    /// Changes a few fields on the trip settings that already exist (never creates them).
+    private func patchTrip(_ fields: [String: JSONValue]) -> Bool {
+        var f = fields
+        f["updatedAt"] = .string(Fmt.stamp())
+        if let index = queue.lastIndex(where: { $0.op == .upsert && $0.coll == "prefs" && $0.docId == "trip" }) {
+            for (key, value) in f { queue[index].fields[key] = value }
+            saveQueue()
+            rebuild()
+            kick()
+        } else if cache.colls["prefs"]?["trip"] != nil {
+            enqueue(.upsert, "prefs", "trip", f)
+        } else {
+            return false
+        }
+        Haptics.tap()
+        return true
+    }
+
+    // MARK: - POSTed documents (tracked, plans, trips)
+
+    /// A doc not on the server yet: change the create that will be sent instead of queueing a PATCH.
+    private func replaceQueuedCreate(_ coll: String, _ id: String, with fields: [String: JSONValue]) -> Bool {
+        let sending = syncing ? queue.first?.id : nil
+        guard let index = queue.firstIndex(where: { $0.op == .create && $0.coll == coll && $0.docId == id && $0.id != sending })
+        else { return false }
+        var next = fields
+        for key in ["createdAt", "addedAt", "addedVia"] {
+            if let kept = queue[index].fields[key] { next[key] = kept }
+        }
+        queue[index].fields = next
+        saveQueue()
+        rebuild()
+        kick()
+        return true
+    }
+
+    private func replaceQueuedField(_ coll: String, _ id: String, _ fields: [String: JSONValue]) -> Bool {
+        let sending = syncing ? queue.first?.id : nil
+        guard let index = queue.firstIndex(where: { $0.op == .create && $0.coll == coll && $0.docId == id && $0.id != sending })
+        else { return false }
+        for (key, value) in fields { queue[index].fields[key] = value }
+        saveQueue()
+        rebuild()
+        return true
+    }
+
+    private func removePosted(_ coll: String, _ id: String, isLocal: Bool) {
+        // While a sync is sending the head of the queue, that write is already on its way.
+        let sending = syncing ? queue.first?.id : nil
+        queue.removeAll { $0.coll == coll && $0.docId == id && $0.id != sending }
+        if isLocal && queue.contains(where: { $0.coll == coll && $0.docId == id }) {
+            // Its create is on its way right now; delete the server's copy once it lands.
+            stopAfterCreate.insert(id)
+        }
+        if !isLocal {
+            queue.append(PendingWrite(op: .delete, coll: coll, docId: id, fields: [:]))
+        }
+        saveQueue()
+        rebuild()
+        kick()
+        Haptics.tap()
+    }
+
     // MARK: - Sync
 
     func kick(reason: RefreshReason? = nil) {
@@ -441,6 +739,9 @@ final class Store: ObservableObject {
             let fresh = try await client.catalog()
             cache.catalogAt = Date()
             cache.catalog = fresh.isV3 ? fresh : nil
+            // A fresh catalog gives every listed feature another try.
+            cache.featuresOff = nil
+            featuresOff = []
             setLevel(fresh.isV3 ? .v3 : .v2)
         } catch APIError.notFound {
             cache.catalogAt = Date()
@@ -559,7 +860,7 @@ final class Store: ObservableObject {
     /// One write. On 409 (or 404) it re-syncs and tries once more with the fresh version.
     private func send(_ write: PendingWrite, _ client: APIClient, retry: Bool) async -> Outcome {
         let current = cache.colls[write.coll]?[write.docId]
-        let isTracked = write.coll == "tracked"
+        let isPosted = Store.postedColls.contains(write.coll)
         do {
             switch write.op {
             case .create:
@@ -576,8 +877,8 @@ final class Store: ObservableObject {
                 if let current {
                     saved = try await client.patch(write.coll, write.docId, fields: write.fields,
                                                    ifVersion: current.version)
-                } else if isTracked {
-                    // Gone from the server: there is nothing to change (tracked sailings are never made by PUT).
+                } else if isPosted {
+                    // Gone from the server: there is nothing to change (these are never made by PUT).
                     return .sent
                 } else {
                     let data = write.fields.compactMapValues { value -> JSONValue? in value == .null ? nil : value }
@@ -595,7 +896,7 @@ final class Store: ObservableObject {
             }
             return .sent
         } catch let error as APIError {
-            if isTracked, let outcome = trackedFailure(write, error) { return outcome }
+            if isPosted, let outcome = postedFailure(write, error) { return outcome }
             switch error {
             case .conflict, .notFound:
                 if write.op == .delete, case .notFound = error { return .sent }
@@ -624,16 +925,26 @@ final class Store: ObservableObject {
         }
     }
 
-    /// CONTRACT_V3 section 8: a tracked write never waits on an older server. A 404 on create, or a 405 on any of
-    /// them, drops it and the app goes back to v2 behaviour; a 409 on create means it is already tracked.
-    private func trackedFailure(_ write: PendingWrite, _ error: APIError) -> Outcome? {
+    /// CONTRACT_V3 section 8 and CONTRACT_V4 section 9: a tracked, plan or trip write never waits on a server
+    /// without it. A 404 on create, or a 405 on any of them, drops it and turns that part off (tracking: back to v2
+    /// behaviour); a 409 on create means it is already there, which counts as done.
+    private func postedFailure(_ write: PendingWrite, _ error: APIError) -> Outcome? {
         switch (write.op, error) {
         case (.create, .conflict):
             return .sent
         case (.create, .notFound), (_, .unsupported):
-            setLevel(.v2)
-            saveCache()
-            return .dropped("Tracking isn't on the deal server yet, so that change wasn't saved.")
+            switch write.coll {
+            case "plans":
+                turnOff(.plans)
+                return .dropped("Plans aren't on the deal server yet, so that change wasn't saved.")
+            case "trips":
+                turnOff(.trips)
+                return .dropped("My trips isn't on the deal server yet, so that change wasn't saved.")
+            default:
+                setLevel(.v2)
+                saveCache()
+                return .dropped("Tracking isn't on the deal server yet, so that change wasn't saved.")
+            }
         default:
             return nil
         }
@@ -686,7 +997,7 @@ final class Store: ObservableObject {
     /// Saves My Trip. The buckets re-sort at once from the queued change; the brain reads it on its next run. The
     /// v3 fields go only to a v3 server.
     func saveTrip(_ prefs: TripPrefs) {
-        enqueue(.upsert, "prefs", "trip", prefs.cleaned().fields(v3: isV3))
+        enqueue(.upsert, "prefs", "trip", prefs.cleaned().fields(v3: isV3, v4: v4Features))
         Haptics.success()
     }
 
@@ -790,6 +1101,7 @@ final class Store: ObservableObject {
         askedForPush = false
         problem = nil
         level = .unknown
+        featuresOff = []
         catalog = .builtIn
         CatalogIndex.current = catalog
         rebuild()
@@ -897,6 +1209,16 @@ final class Store: ObservableObject {
         tracked = (colls["tracked"] ?? [:]).values
             .compactMap { TrackedSailing(raw: $0, isLocal: localIds.contains($0.id)) }
             .sorted(by: TrackedSailing.order)
+
+        // v4
+        digest = DigestDoc.latest((colls["digest"] ?? [:]).values.compactMap { DigestDoc(raw: $0) })
+        plans = (colls["plans"] ?? [:]).values
+            .compactMap { Plan(raw: $0, isLocal: localIds.contains($0.id)) }
+            .sorted(by: Plan.order)
+        trips = (colls["trips"] ?? [:]).values
+            .compactMap { PastTrip(raw: $0, isLocal: localIds.contains($0.id)) }
+            .sorted(by: PastTrip.order)
+        ports = colls["ports"]?["summary"].flatMap { PortsSummary(raw: $0) }
 
         pendingKeys = Set(queue.map { "\($0.coll)/\($0.docId)" })
         updateBadge()

@@ -58,6 +58,7 @@ private struct DealDetailContent: View {
                 } else {
                     priceSection
                     tripFitSection
+                    portFitSection
                 }
                 whySection
                 if deal.kind != .sale {
@@ -67,6 +68,9 @@ private struct DealDetailContent: View {
                     historySection
                 }
                 perksSection
+                if store.has(.booking) {
+                    AlternativesSection(choice: store.bookChoice(for: deal))
+                }
                 sourcesSection
                 Section {
                     AskThread(dealId: deal.id)
@@ -484,6 +488,21 @@ private struct DealDetailContent: View {
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            let choice = store.bookChoice(for: deal)
+            if store.has(.booking), let target = choice.primary {
+                // v4: always the sailing's own line; what it opens is said under it.
+                HStack(alignment: .top, spacing: 10) {
+                    BookButtonLarge(choice: choice)
+                    ShareLink(item: deal.link ?? target.url, subject: Text(deal.title), message: Text(shareText)) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.headline)
+                    }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.large)
+                    .accessibilityLabel(Text("Share"))
+                }
+            } else {
             HStack(spacing: 10) {
                 if let url = deal.link {
                     Link(destination: url) {
@@ -506,11 +525,32 @@ private struct DealDetailContent: View {
                     .accessibilityLabel(Text("Share"))
                 }
             }
+            }
         }
         .padding(.horizontal)
         .padding(.top, 10)
         .padding(.bottom, 6)
         .background(.bar)
+    }
+
+    /// v4: what Jim's own port history says about this sailing, softly. It never hides the deal.
+    @ViewBuilder
+    private var portFitSection: some View {
+        if let fit = store.portFit(deal), !fit.phrases.isEmpty {
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(fit.phrases, id: \.self) { phrase in
+                        Label(Words.capitalizedFirst(phrase), systemImage: "mappin.and.ellipse")
+                            .font(.subheadline)
+                    }
+                }
+                .padding(.vertical, 2)
+            } header: {
+                Text("Your ports")
+            } footer: {
+                Text("From My trips. It only nudges the order; a good deal still shows.")
+            }
+        }
     }
 
     private var openHint: String {

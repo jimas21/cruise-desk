@@ -194,6 +194,9 @@ struct TrackedSailing: Identifiable, Hashable {
     let data: TrackedData
     /// Saved on this phone and not on the deal server yet.
     var isLocal = false
+    /// v4 fill: the line's own page for this sailing and any agency that is clearly better.
+    var booking: BookingInfo? = nil
+    var alternatives: [BookAlternative] = []
 
     init?(raw: RawDoc, isLocal: Bool = false) {
         guard let decoded = raw.data.decode(TrackedData.self) else { return nil }
@@ -201,12 +204,16 @@ struct TrackedSailing: Identifiable, Hashable {
         version = raw.version
         data = decoded
         self.isLocal = isLocal
+        booking = BookingInfo.from(raw.data)
+        alternatives = BookAlternative.from(raw.data)
     }
 
-    init(id: String, data: TrackedData) {
+    init(id: String, data: TrackedData, booking: BookingInfo? = nil, alternatives: [BookAlternative] = []) {
         self.id = id
         self.version = 1
         self.data = data
+        self.booking = booking
+        self.alternatives = alternatives
     }
 
     var line: String { CruiseLine.resolved(data.line) }

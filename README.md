@@ -18,6 +18,22 @@ A native iPhone app for the cruise deal desk: the deals Claude finds, one glance
   the sailings Deal Desk already knows, from a deal (the binoculars), or by pasting a sailing link (read on the
   phone; nothing is fetched). Each one shows now vs typical vs the lowest seen with a price sparkline; fields read
   "filling…" until the server fills them from its fare data. Swipe left to stop tracking.
+- **Book on the line** (v4): every deal, tracked sailing and search result has one main button, "Book on <line>",
+  that opens the sailing's own cruise line's site in Safari (the exact sailing where the line's links allow it,
+  else the line's own search for that ship and date, and it says which), for every line. The page the price was
+  seen on is a small "Seen on <source>" link. An agency shows only as a second, labelled row with the reason it is
+  clearly better ("Or Costco Travel · same fare + $250 Costco Shop Card"); it never opens by itself. Settings can
+  switch from "the cruise line" to "best value".
+- **Newsletters** (v4): a small card at the top of Deals ("Newsletters · 3 new") opens one short list of what the
+  cruise emails said, deduplicated across senders, with their links; an item about a deal on the board opens it.
+- **Search and plans** (v4, the magnifying glass on Deals): every sailing a source has seen in the last 45 days,
+  by line, ship or size, port or region, dates or months, nights, cabin, budget and deal kind. Each result books on
+  its line or is tracked in one tap. A search can be saved as a plan Deal Desk watches, edited, and promoted to
+  My Trip.
+- **My trips** (v4, in the Tracking tab): the cruises already taken, each port rated 1 to 10 (ports pre-filled from
+  what Deal Desk knows about that sailing), with a port's history. Loved ports lift sailings that stop there and
+  recently visited ones count a little less for a while ("you were in Cozumel 4 weeks ago"); neither ever hides a
+  deal or holds back an alert.
 - **My Trip**: lines, ship sizes, Royal Caribbean classes, length, cabin, who's going, budget, ports, regions, dates
   and sail months, what counts as a deal (new low, % under typical, price drop, sale, fits my trip; the lowest
   score), alerts and how often to check, in plain words. The buckets re-sort on the phone the moment it is saved;
@@ -39,7 +55,9 @@ time. Alerts arrive as native push; a tap opens that deal. `dealdesk://deal/<id>
 (a Shortcut can hand one over). On a v3 server, opening the app also asks for a light refresh of the sources that
 allow automated checks (at most every 5 minutes) and syncs again 90 seconds later. Until `GET /v1/catalog` says
 the server is v3, the app keeps its v2 behaviour: Tracking, My Lines and coverage say "coming soon", and no v3
-field or tracked write is ever sent.
+field or tracked write is ever sent. Each v4 part (booking, digest, search, plans, trips) turns on only when
+`GET /v1/catalog` says apiVersion 4 and lists it; until then it says "coming soon" and the deal button keeps the
+deal's own link. Plans and trips queue offline like tracked sailings; a 404 or 405 turns that part off again.
 
 ## Building
 

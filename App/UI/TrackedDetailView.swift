@@ -54,6 +54,9 @@ private struct TrackedDetailContent: View {
             cabinOptionsSection
             alertsSection
             noteSection
+            if store.has(.booking) {
+                AlternativesSection(choice: store.bookChoice(for: item))
+            }
             sourcesSection
             pickSection
             Section {
@@ -341,30 +344,51 @@ private struct TrackedDetailContent: View {
     @ViewBuilder
     private var bottomBar: some View {
         let deal = d.dealId.flatMap { store.deal($0) }
-        if deal != nil || item.link != nil {
-            HStack(spacing: 10) {
-                if let deal {
-                    Button {
-                        router.openDeal(deal.id)
-                    } label: {
-                        Label("See the deal", systemImage: "tag")
-                            .font(.headline)
-                            .foregroundStyle(Palette.onAccent)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.capsule)
-                    .controlSize(.large)
+        let book = store.bookChoice(for: item)
+        if deal != nil || item.link != nil || book.primary != nil {
+            VStack(spacing: 10) {
+                // v4: the line's own site for this sailing comes first.
+                if book.primary != nil {
+                    BookButtonLarge(choice: book)
                 }
-                if let url = item.link {
-                    Link(destination: url) {
-                        Label("Open the page", systemImage: "safari")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
+                if deal != nil || item.link != nil {
+                    HStack(spacing: 10) {
+                        if let deal {
+                            if book.primary == nil {
+                                Button {
+                                    router.openDeal(deal.id)
+                                } label: {
+                                    Label("See the deal", systemImage: "tag")
+                                        .font(.headline)
+                                        .foregroundStyle(Palette.onAccent)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .buttonBorderShape(.capsule)
+                                .controlSize(.large)
+                            } else {
+                                Button {
+                                    router.openDeal(deal.id)
+                                } label: {
+                                    Label("See the deal", systemImage: "tag")
+                                        .font(.subheadline.weight(.semibold))
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .buttonBorderShape(.capsule)
+                            }
+                        }
+                        if let url = item.link {
+                            Link(destination: url) {
+                                Label("Open the page", systemImage: "safari")
+                                    .font(book.primary == nil ? Font.headline : Font.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .buttonBorderShape(.capsule)
+                            .controlSize(book.primary == nil ? ControlSize.large : ControlSize.regular)
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.capsule)
-                    .controlSize(.large)
                 }
             }
             .padding(.horizontal)

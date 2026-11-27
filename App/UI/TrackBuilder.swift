@@ -18,6 +18,8 @@ struct TrackBuilder: View {
     @State private var loading = false
     @State private var showAll = false
     @State private var alert: String?
+    /// v4: the line link last handed to the deal server to read (its text only).
+    @State private var askedURL: String?
     @FocusState private var linkFocused: Bool
 
     /// Starts from a deal's sailing, from a link (or an empty link box), or blank.
@@ -129,7 +131,9 @@ struct TrackBuilder: View {
         } header: {
             Text("Add from a link")
         } footer: {
-            Text("A sailing page from AllAboardDeals or a cruise line's site, with its title if you have it. It's read on this phone only; nothing is fetched.")
+            Text(store.has(.booking)
+                 ? "A sailing page from AllAboardDeals or a cruise line's own site, with its title if you have it. It's read on this phone, and a line's own link by the deal server from its text; nothing is fetched."
+                 : "A sailing page from AllAboardDeals or a cruise line's site, with its title if you have it. It's read on this phone only; nothing is fetched.")
         }
         .onChange(of: linkText) { _, text in
             if text.contains("://") { read(text) }
@@ -138,7 +142,9 @@ struct TrackBuilder: View {
 
     private func read(_ text: String) {
         guard !text.trimmed.isEmpty else { return }
-        guard let found = LinkPick.read(text, catalog: store.catalog), found.foundSailing || found.line != nil else {
+        let local = LinkPick.read(text, catalog: store.catalog)
+        defer { askServer(text, local: local) }
+        guard let found = local, found.foundSailing || found.line != nil else {
             fromLink = nil
             linkMiss = true
             return
@@ -151,6 +157,32 @@ struct TrackBuilder: View {
             typingShip = !pick.ship.trimmed.isEmpty && !ships.contains { $0.key == Slug.ship(pick.ship) }
         }
         Haptics.tap()
+    }
+
+    /// v4 (CONTRACT_V4 slice 0c): a cruise line's own link also goes to `POST /v1/link/parse`, which reads the
+    /// line, ship and date from the link's text with the catalog's ship codes. Nothing is fetched by anyone.
+    private func askServer(_ text: String, local: LinkPick?) {
+        guard store.has(.booking), let url = LinkPick.firstURL(in: text), let host = url.host,
+              CruiseLine.fromHost(host) != nil else { return }
+        let address = url.absoluteString
+        guard address != askedURL else { return }
+        askedURL = address
+        Task {
+            guard let parsed = await store.parseLink(address), askedURL == address else { return }
+            var merged = local ?? LinkPick()
+            if let line = parsed.line.flatMap({ CruiseLine.canonical($0) }) { merged.line = line }
+            if let ship = parsed.ship?.trimmed, !ship.isEmpty { merged.ship = ship }
+            if let day = parsed.sailDate, Fmt.day(day) != nil { merged.sailDate = day }
+            if merged.link == nil { merged.link = TrackPick.validLink(address) }
+            guard merged.foundSailing || merged.line != nil, merged != fromLink else { return }
+            linkMiss = false
+            fromLink = merged
+            withAnimation(Motion.snappy) {
+                TrackBuilder.apply(merged, to: &pick)
+                typingShip = !pick.ship.trimmed.isEmpty && !ships.contains { $0.key == Slug.ship(pick.ship) }
+            }
+            Haptics.tap()
+        }
     }
 
     static func apply(_ found: LinkPick, to pick: inout TrackPick) {
