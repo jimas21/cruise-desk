@@ -1,0 +1,59 @@
+name: Compile check
+
+# Compiles the app for the iOS Simulator, unsigned, on every push, so Swift mistakes show up in minutes.
+# No secrets: the server address and token stay the placeholders from project.yml.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compile-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    runs-on: macos-26
+    timeout-minutes: 25
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Make app icon
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet pillow
+          "$RUNNER_TEMP/venv/bin/python" ci/make_icon.py App/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+
+      - name: Install XcodeGen
+        run: brew install xcodegen || { brew update && brew install xcodegen; }
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Compile for the simulator (unsigned)
+        run: |
+          xcodegen generate
+          status=0
+          xcodebuild -project DealDesk.xcodeproj -scheme DealDesk -configuration Release \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build > build.log 2>&1 || status=$?
+          echo "--- errors and warnings in our code ---"
+          grep -E '/App/.*: (error|warning): ' build.log | sed -E 's#^.*/App/#App/#' | sort -u | head -n 200 || true
+          if [ "$status" -ne 0 ] || ! grep -q 'BUILD SUCCEEDED' build.log; then
+            echo "--- context ---"
+            grep -E -B2 -A6 ' error: ' build.log | head -n 400 || true
+            echo "--- last lines ---"
+            tail -n 30 build.log
+            echo "::error::Build failed"
+            exit 1
+          fi
+          echo "BUILD SUCCEEDED"

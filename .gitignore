@@ -1,0 +1,32 @@
+# Never commit signing material, tokens or server addresses.
+
+# Generated at build time
+App/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+*.xcodeproj
+*.xcworkspace
+build/
+build.log
+DerivedData/
+*.xcarchive
+*.ipa
+xcuserdata/
+.DS_Store
+
+# Apple signing and API material
+*.p8
+*.p12
+*.cer
+*.certSigningRequest
+*.mobileprovision
+*.provisionprofile
+*.pem
+*.key
+AuthKey_*
+.env
+.env.*
+
+# Local notes and caches
+.planning/
+.claude/
+__pycache__/
+*.pyc
