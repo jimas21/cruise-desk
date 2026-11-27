@@ -71,16 +71,24 @@ private struct PlayRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 if let saves = play.data.saves, !saves.isEmpty {
                     Text(saves)
-                        .font(.system(.title3, design: .rounded, weight: .semibold))
+                        .font(.system(.headline, design: .rounded, weight: .semibold))
                         .monospacedDigit()
                         .foregroundStyle(Palette.accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .layoutPriority(1)
                 }
                 Spacer(minLength: 8)
                 if let deadline = play.deadlineDay {
-                    Label(Fmt.deadline(deadline), systemImage: "clock")
-                        .font(.footnote.weight(.medium))
-                        .monospacedDigit()
-                        .foregroundStyle(Fmt.daysLeft(deadline) <= 2 ? Palette.call : Color.secondary)
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.caption.weight(.semibold))
+                        Text(Fmt.deadline(deadline))
+                            .monospacedDigit()
+                    }
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Fmt.daysLeft(deadline) <= 2 ? Palette.call : Color.secondary)
+                    .lineLimit(1)
                 }
             }
             if let who = play.data.who, !who.isEmpty {

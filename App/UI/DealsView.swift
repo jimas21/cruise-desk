@@ -65,7 +65,7 @@ struct DealsView: View {
             List {
                 Section {
                     DealsHeader(status: store.status, syncing: store.syncing) { showStatus = true }
-                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
+                        .listRowInsets(EdgeInsets(top: 4, leading: CardList.gutter, bottom: 4, trailing: CardList.gutter))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                     Picker("Show", selection: $filter.animation(Motion.snappy)) {
@@ -74,10 +74,11 @@ struct DealsView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 2, trailing: 0))
+                    .listRowInsets(EdgeInsets(top: 10, leading: CardList.gutter, bottom: 8, trailing: CardList.gutter))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
+                .listSectionSeparator(.hidden)
 
                 if let problem = store.problem {
                     ProblemRow(problem: problem, lastSync: store.lastSync) { showSettings = true }
@@ -89,6 +90,7 @@ struct DealsView: View {
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
+                    .listSectionSeparator(.hidden)
                 } else {
                     Section {
                         ForEach(items) { deal in
@@ -137,10 +139,10 @@ struct DealsView: View {
                             }
                         }
                     }
+                    .listSectionSeparator(.hidden)
                 }
             }
-            .listStyle(.insetGrouped)
-            .listSectionSpacing(.compact)
+            .cardList()
             .onChange(of: filter) { Haptics.tap() }
             .navigationTitle("Deals")
             .toolbar {
@@ -293,9 +295,13 @@ struct ProblemRow: View {
                             .padding(.top, 2)
                     }
                 }
+                Spacer(minLength: 0)
             }
-            .padding(.vertical, 2)
+            .padding(14)
+            .background(CardBackground())
+            .cardRow()
         }
+        .listSectionSeparator(.hidden)
     }
 
     private var needsSettings: Bool {

@@ -139,7 +139,7 @@ private struct SeaPainter {
 
     func paint(_ ctx: inout GraphicsContext, _ size: CGSize) {
         let w = size.width, h = size.height
-        let horizon = (h * 0.56).rounded()
+        let horizon = (h * 0.48).rounded()
 
         let skyColors: [Color] = night
             ? [Color(hex: 0x06142A), Color(hex: 0x0E2A48), Color(hex: 0x1D4A69)]
@@ -172,13 +172,12 @@ private struct SeaPainter {
                                        endPoint: CGPoint(x: 0, y: h)))
 
         let back = Swell(baseline: horizon + 2, amplitude: 1.6, wavelength: w * 0.34, speed: 0.35, offset: 0.4)
-        let mid = Swell(baseline: horizon + h * 0.16, amplitude: 3.6, wavelength: w * 0.55, speed: -0.42, offset: 1.3)
-        let front = Swell(baseline: horizon + h * 0.31, amplitude: 4.6, wavelength: w * 0.8, speed: 0.55, offset: 2.6)
+        let mid = Swell(baseline: horizon + h * 0.12, amplitude: 3.2, wavelength: w * 0.55, speed: -0.42, offset: 1.3)
+        let front = Swell(baseline: horizon + h * 0.27, amplitude: 4.6, wavelength: w * 0.8, speed: 0.55, offset: 2.6)
 
         ctx.fill(back.body(width: w, bottom: h, time: time), with: .color(night ? Color(hex: 0x1A4D6B) : Color(hex: 0x86C9DB)))
-        glitter(&ctx, x: light.x, from: horizon + 4, to: mid.baseline - 4)
 
-        ship(&ctx, x: w * 0.3, on: mid, width: min(max(w * 0.17, 54), 78))
+        ship(&ctx, x: w * 0.28, on: mid, width: min(max(w * 0.16, 52), 72))
 
         ctx.fill(mid.body(width: w, bottom: h, time: time), with: .color(night ? Color(hex: 0x113A55) : Color(hex: 0x3E9EBB)))
         ctx.stroke(mid.crest(width: w, time: time), with: .color(Color.white.opacity(night ? 0.14 : 0.35)), lineWidth: 1.2)
@@ -206,23 +205,6 @@ private struct SeaPainter {
             path.addPath(disc(CGPoint(x: x + 18 * k, y: y + 2 * k), 9 * k))
             path.addPath(disc(CGPoint(x: x + 32 * k, y: y + 1 * k), 12 * k))
             ctx.fill(path, with: .color(Color.white.opacity(0.7)))
-        }
-    }
-
-    /// Light on the water under the sun or moon.
-    private func glitter(_ ctx: inout GraphicsContext, x: CGFloat, from top: CGFloat, to bottom: CGFloat) {
-        guard bottom > top else { return }
-        let color = night ? Color(hex: 0xF5EFD6) : Color.white
-        var y = top
-        var i = 0
-        while y < bottom {
-            let f = Double((y - top) / max(bottom - top, 1))
-            let half = CGFloat(6 + 14 * f) * (i % 2 == 0 ? 1 : 0.6)
-            let shift = CGFloat(sin(time * 0.8 + Double(i) * 1.9)) * 2.5
-            ctx.fill(Path(roundedRect: CGRect(x: x - half + shift, y: y, width: half * 2, height: 1.6), cornerRadius: 0.8),
-                     with: .color(color.opacity(0.65 - 0.3 * f)))
-            y += 4 + CGFloat(3 * f)
-            i += 1
         }
     }
 
@@ -263,14 +245,16 @@ struct HeroBackdrop: View {
             Drift { time in
                 Canvas { context, size in
                     let w = size.width, h = size.height
-                    let swells = [
-                        (Swell(baseline: h * 0.70, amplitude: 4, wavelength: w * 0.6, speed: 0.4, offset: 0.5), 0.07),
-                        (Swell(baseline: h * 0.80, amplitude: 5, wavelength: w * 0.75, speed: -0.5, offset: 2.1), 0.09),
-                        (Swell(baseline: h * 0.90, amplitude: 5, wavelength: w * 0.9, speed: 0.6, offset: 3.7), 0.12),
-                    ]
-                    for (swell, opacity) in swells {
-                        context.fill(swell.body(width: w, bottom: h, time: time), with: .color(Color.white.opacity(opacity)))
-                    }
+                    // A pale far swell, then two deeper ones, so the water darkens toward the bottom (white text
+                    // keeps its contrast) with thin light crests.
+                    let far = Swell(baseline: h * 0.72, amplitude: 4, wavelength: w * 0.6, speed: 0.4, offset: 0.5)
+                    let mid = Swell(baseline: h * 0.82, amplitude: 5, wavelength: w * 0.75, speed: -0.5, offset: 2.1)
+                    let near = Swell(baseline: h * 0.91, amplitude: 5, wavelength: w * 0.9, speed: 0.6, offset: 3.7)
+                    context.fill(far.body(width: w, bottom: h, time: time), with: .color(Color.white.opacity(0.07)))
+                    context.fill(mid.body(width: w, bottom: h, time: time), with: .color(Color.black.opacity(0.08)))
+                    context.stroke(mid.crest(width: w, time: time), with: .color(Color.white.opacity(0.16)), lineWidth: 1)
+                    context.fill(near.body(width: w, bottom: h, time: time), with: .color(Color.black.opacity(0.12)))
+                    context.stroke(near.crest(width: w, time: time), with: .color(Color.white.opacity(0.14)), lineWidth: 1)
                 }
             }
         }

@@ -63,6 +63,7 @@ private struct DealDetailContent: View {
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(.compact)
+        .contentMargins(.top, 4, for: .scrollContent)
         .modifier(ScrolledPast(threshold: 150, passed: $heroGone))
         .navigationTitle(deal.title)
         .navigationBarTitleDisplayMode(.inline)

@@ -17,6 +17,16 @@ struct ReviewedView: View {
                     let items = store.reviewed(verdict)
                     if !items.isEmpty {
                         Section {
+                            // The group's name as a plain row, so it scrolls with its cards instead of pinning.
+                            Label("\(verdict.groupTitle) · \(items.count)", systemImage: verdict.symbol)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Palette.verdict(verdict))
+                                .monospacedDigit()
+                                .accessibilityAddTraits(.isHeader)
+                                .listRowInsets(EdgeInsets(top: 16, leading: CardList.gutter + 4, bottom: 2,
+                                                          trailing: CardList.gutter))
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
                             ForEach(items) { deal in
                                 Button {
                                     path.append(deal.id)
@@ -28,18 +38,12 @@ struct ReviewedView: View {
                                 .cardRow()
                                 .accessibilityHint(Text("Opens the details"))
                             }
-                        } header: {
-                            Label("\(verdict.groupTitle) · \(items.count)", systemImage: verdict.symbol)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Palette.verdict(verdict))
-                                .monospacedDigit()
-                                .textCase(nil)
                         }
+                        .listSectionSeparator(.hidden)
                     }
                 }
             }
-            .listStyle(.insetGrouped)
-            .listSectionSpacing(.compact)
+            .cardList()
             .overlay {
                 if isEmpty {
                     IllustratedEmpty(title: "Nothing answered yet",

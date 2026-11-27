@@ -226,12 +226,25 @@ extension DealCard where Footer == EmptyView {
     }
 }
 
+/// Lists of cards (Deals, Reviewed) use the plain list style on the grouped background, so each card's soft
+/// shadow is not clipped by an inset-grouped section.
+enum CardList {
+    static let gutter: CGFloat = 16
+}
+
 extension View {
-    /// A list row that is only its own card: no inset, no cell background, no separator.
+    /// A list row that is only its own card: side gutters, no cell background, no separator.
     func cardRow() -> some View {
-        listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+        listRowInsets(EdgeInsets(top: 7, leading: CardList.gutter, bottom: 7, trailing: CardList.gutter))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
+    }
+
+    /// The list around those cards.
+    func cardList() -> some View {
+        listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Color(uiColor: .systemGroupedBackground))
     }
 }
 
@@ -286,4 +299,5 @@ private struct SaleLines: View {
             DealCard(deal: deal).cardRow()
         }
     }
+    .cardList()
 }

@@ -72,6 +72,21 @@ extension Deal {
     var isExceptional: Bool { data.scoreLabel == "Exceptional" }
 }
 
+/// Navigation titles in SF Pro Rounded, matching the money and the hero names. Sizes follow Dynamic Type.
+enum TitleStyle {
+    static func apply() {
+        let bar = UINavigationBar.appearance()
+        bar.largeTitleTextAttributes = [.font: rounded(.largeTitle, size: 34, weight: .bold)]
+        bar.titleTextAttributes = [.font: rounded(.headline, size: 17, weight: .semibold)]
+    }
+
+    private static func rounded(_ style: UIFont.TextStyle, size: CGFloat, weight: UIFont.Weight) -> UIFont {
+        let base = UIFont.systemFont(ofSize: size, weight: weight)
+        let font = base.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: size) } ?? base
+        return UIFontMetrics(forTextStyle: style).scaledFont(for: font)
+    }
+}
+
 /// [✓ FITS] [? YOUR CALL] [↘ PRICE DROP] [SALE]: the only place kind colours appear on a list.
 /// `onColor` is the white version used on the detail hero.
 struct KindPill: View {
@@ -115,6 +130,10 @@ struct ScoreRing: View {
     }
 
     private var ring: AnyShapeStyle {
+        if onColor && exceptional {
+            return AnyShapeStyle(AngularGradient(colors: [Color.white, Color(hex: 0xFFD98A), Color.white],
+                                                 center: .center, startAngle: .degrees(-90), endAngle: .degrees(270)))
+        }
         if onColor { return AnyShapeStyle(Color.white) }
         if exceptional {
             return AnyShapeStyle(AngularGradient(colors: [Palette.accent, Palette.highlight, Palette.accent],
@@ -145,7 +164,8 @@ struct ScoreRing: View {
             if let label, !label.isEmpty {
                 Text(label)
                     .font(.system(.caption2, design: .rounded, weight: .semibold))
-                    .foregroundStyle(onColor ? Color.white.opacity(0.85) : (exceptional ? Palette.highlight : Color.secondary))
+                    .foregroundStyle(onColor ? (exceptional ? Color(hex: 0xFFE3A6) : Color.white.opacity(0.85))
+                                             : (exceptional ? Palette.highlight : Color.secondary))
                     .lineLimit(1)
             }
         }
@@ -165,8 +185,9 @@ struct CardBackground: View {
         let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
         shape
             .fill(Palette.card)
-            .shadow(color: Color.black.opacity(scheme == .dark ? 0 : 0.07), radius: 9, x: 0, y: 3)
-            .shadow(color: highlight ? Palette.highlight.opacity(scheme == .dark ? 0.18 : 0.16) : .clear, radius: 10, x: 0, y: 2)
+            .shadow(color: Color.black.opacity(scheme == .dark ? 0 : 0.06), radius: 1, x: 0, y: 0.5)
+            .shadow(color: Color.black.opacity(scheme == .dark ? 0 : 0.07), radius: 7, x: 0, y: 3)
+            .shadow(color: highlight ? Palette.highlight.opacity(scheme == .dark ? 0.22 : 0.18) : .clear, radius: 7, x: 0, y: 1)
             .overlay {
                 if highlight {
                     shape.strokeBorder(LinearGradient(colors: [Palette.accent.opacity(0.7), Palette.highlight],
