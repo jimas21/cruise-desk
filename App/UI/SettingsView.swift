@@ -24,7 +24,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section {
-                TextField("https://deals.example.org", text: $address)
+                TextField(Self.addressPrompt, text: $address)
                     .keyboardType(.URL)
                     .textContentType(.URL)
                     .textInputAutocapitalization(.never)
@@ -122,6 +122,8 @@ struct SettingsView: View {
             alerts = await Push.authorizationStatus()
         }
     }
+
+    private static let addressPrompt: String = "Server address, https://…"
 
     private var canSave: Bool {
         let typed = address.trimmed

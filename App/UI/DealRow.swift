@@ -10,6 +10,7 @@ import SwiftUI
 ///     Lowest Icon balcony we've seen — $163/night vs $216
 struct DealRow: View {
     let deal: Deal
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -25,26 +26,52 @@ struct DealRow: View {
         .accessibilityLabel(Text(Speech.deal(deal)))
     }
 
+    @ViewBuilder
     private var header: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                if let kind = deal.kind {
-                    KindPill(kind: kind)
-                }
-                if deal.kind == .call, let breaks = deal.data.breaks, !breaks.isEmpty {
-                    Text(breaks)
-                        .font(.caption)
-                        .foregroundStyle(Palette.call)
-                        .lineLimit(1)
+        if typeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 12) {
+                    pills
+                    Spacer(minLength: 8)
+                    chip
                 }
                 Text(deal.title)
                     .font(.headline)
-                    .lineLimit(2)
+                    .lineLimit(3)
             }
-            Spacer(minLength: 8)
-            if let score = deal.data.score {
-                ScoreChip(score: score, label: deal.data.scoreLabel)
+        } else {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    pills
+                    Text(deal.title)
+                        .font(.headline)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 8)
+                chip
             }
+        }
+    }
+
+    /// Kind pill, plus the one broken rule under it for "Your call".
+    private var pills: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let kind = deal.kind {
+                KindPill(kind: kind)
+            }
+            if deal.kind == .call, let breaks = deal.data.breaks, !breaks.isEmpty {
+                Text(breaks)
+                    .font(.caption)
+                    .foregroundStyle(Palette.call)
+                    .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var chip: some View {
+        if let score = deal.data.score {
+            ScoreChip(score: score, label: deal.data.scoreLabel)
         }
     }
 }
@@ -178,16 +205,25 @@ private struct SaleLines: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             ForEach(Array(offers.enumerated()), id: \.offset) { item in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(item.element.label)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 8)
-                    Text(item.element.value)
-                        .fontWeight(.semibold)
-                        .monospacedDigit()
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(item.element.label)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 8)
+                        Text(item.element.value)
+                            .fontWeight(.semibold)
+                            .monospacedDigit()
+                    }
+                    .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(item.element.label)
+                            .foregroundStyle(.secondary)
+                        Text(item.element.value)
+                            .fontWeight(.semibold)
+                            .monospacedDigit()
+                    }
                 }
                 .font(.subheadline)
-                .lineLimit(1)
             }
             if offers.isEmpty, let why = deal.data.why, !why.isEmpty {
                 Text(why)

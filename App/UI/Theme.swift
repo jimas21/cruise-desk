@@ -8,6 +8,8 @@ enum Palette {
     static let call = dynamic(light: 0x8A5A0B, dark: 0xE3A94A)
     static let drop = accent
     static let sale = dynamic(light: 0x7A3E8F, dark: 0xC48BD8)
+    /// Text on a filled accent shape (white on #0B6E8A; near-black on the brighter dark-mode #3FB3D1).
+    static let onAccent = dynamic(light: 0xFFFFFF, dark: 0x05232D)
 
     static func kind(_ kind: DealKind) -> Color {
         switch kind {
@@ -74,7 +76,7 @@ struct ScoreChip: View {
             Text(String(score))
                 .font(.title3.weight(.bold))
                 .monospacedDigit()
-                .foregroundStyle(strong ? Color.white : Palette.accent)
+                .foregroundStyle(strong ? Palette.onAccent : Palette.accent)
                 .frame(minWidth: side, minHeight: side)
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -198,7 +200,7 @@ struct ChipPicker: View {
                 .font(.subheadline.weight(.medium))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
-                .foregroundStyle(on ? Color.white : Color.primary)
+                .foregroundStyle(on ? Palette.onAccent : Color.primary)
                 .background(Capsule().fill(on ? Palette.accent : Color(uiColor: .tertiarySystemFill)))
         }
         .buttonStyle(.plain)

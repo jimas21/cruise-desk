@@ -120,8 +120,12 @@ private struct ProposedRuleRow: View {
                     .foregroundStyle(Palette.accent)
             }
             HStack(spacing: 10) {
-                Button("Use") { store.setRule(rule, status: .active) }
-                    .buttonStyle(.borderedProminent)
+                Button {
+                    store.setRule(rule, status: .active)
+                } label: {
+                    Text("Use").foregroundStyle(Palette.onAccent)
+                }
+                .buttonStyle(.borderedProminent)
                 Button("No") { store.setRule(rule, status: .declined) }
                     .buttonStyle(.bordered)
                 Spacer()

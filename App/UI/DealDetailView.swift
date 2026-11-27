@@ -304,6 +304,7 @@ private struct DealDetailContent: View {
                     Link(destination: url) {
                         Label("Open deal", systemImage: "safari")
                             .font(.headline)
+                            .foregroundStyle(Palette.onAccent)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
