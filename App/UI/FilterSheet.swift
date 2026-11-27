@@ -1,22 +1,54 @@
 import SwiftUI
 
-/// Narrows both buckets: ship class, nights, cabin type, where it leaves from, sail month and the most for the
-/// trip. Nothing picked means "any". Changes apply on Done.
+/// Narrows both buckets: line, ship size, Royal class, nights, cabin type, where it leaves from, sail month, the
+/// kind of deal, the lowest score and the most for the trip. Nothing picked means "any". Changes apply on Done.
 struct FilterSheet: View {
     @Binding var filters: DealFilters
     let deals: [Deal]
+    /// My Lines, offered first.
+    let myLines: [String]
+    let minPctUnder: Int
+    /// Does a deal pass My Trip (for the "Fits my trip" kind).
+    let fits: (Deal) -> Bool
     @Environment(\.dismiss) private var dismiss
     @State private var draft: DealFilters
 
-    init(filters: Binding<DealFilters>, deals: [Deal]) {
+    init(filters: Binding<DealFilters>, deals: [Deal], myLines: [String] = [], minPctUnder: Int = 15,
+         fits: @escaping (Deal) -> Bool = { _ in false }) {
         _filters = filters
         self.deals = deals
+        self.myLines = myLines
+        self.minPctUnder = minPctUnder
+        self.fits = fits
         _draft = State(initialValue: filters.wrappedValue)
     }
 
     private static let totals = [2000, 2500, 3000, 3500, 4000, 5000, 7500, 10000]
+    private static let scores = [50, 60, 70, 80, 90]
 
-    private var matching: Int { deals.filter { draft.matches($0) }.count }
+    private var matching: Int {
+        deals.filter { draft.matches($0, fits: fits($0), minPctUnder: minPctUnder) }.count
+    }
+
+    /// "Royal Caribbean: tracking live · Celebrity: limited data", from the deal server's catalog (v3 only).
+    private var coverageNote: String? {
+        let catalog = CatalogIndex.current
+        guard catalog.isV3 else { return nil }
+        let parts = lineIds.compactMap { name -> String? in
+            guard let state = catalog.line(name)?.coverageState else { return nil }
+            return "\(name): \(state.title.lowercased())"
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// My Lines, then any other line a deal is on, then anything already picked.
+    private var lineIds: [String] {
+        var out: [String] = []
+        for name in myLines + deals.map({ $0.line }) + draft.lines {
+            if !out.contains(where: { CruiseLine.same($0, name) }) { out.append(name) }
+        }
+        return out
+    }
 
     private var placeIds: [String] {
         var seen: [String] = []
@@ -42,9 +74,31 @@ struct FilterSheet: View {
                             .monospacedDigit()
                     }
                 }
-                Section("Ship class") {
+                Section {
+                    ChipPicker(options: lineIds.map { ReasonOption(id: $0, title: $0) },
+                               selection: chosen(\.lines, order: lineIds))
+                } header: {
+                    Text("Line")
+                } footer: {
+                    if let coverage = coverageNote {
+                        Text(coverage)
+                    }
+                }
+                Section {
+                    ChipPicker(options: ShipSize.allCases.map { ReasonOption(id: $0.rawValue, title: $0.title) },
+                               selection: chosen(\.sizes, order: ShipSize.allCases.map { $0.rawValue }))
+                } header: {
+                    Text("Ship size")
+                } footer: {
+                    Text("Small is under 70k tons, mid-size to 120k, large to 180k, mega above. A ship of unknown size still shows.")
+                }
+                Section {
                     ChipPicker(options: ShipClass.allCases.map { ReasonOption(id: $0.rawValue, title: $0.short) },
                                selection: chosen(\.shipClasses, order: ShipClass.allCases.map { $0.rawValue }))
+                } header: {
+                    Text("Royal Caribbean class")
+                } footer: {
+                    Text("Picking a class keeps Royal Caribbean ships of that class only.")
                 }
                 Section("Nights") {
                     Stepper(value: nightsMin, in: 0...30) {
@@ -68,6 +122,20 @@ struct FilterSheet: View {
                         ChipPicker(options: monthIds.map { ReasonOption(id: $0, title: Fmt.monthTitle($0)) },
                                    selection: chosen(\.months, order: monthIds))
                     }
+                }
+                Section("Kind of deal") {
+                    ChipPicker(options: DealType.allCases.map { ReasonOption(id: $0.rawValue, title: $0.title) },
+                               selection: chosen(\.dealTypes, order: DealType.allCases.map { $0.rawValue }))
+                }
+                Section {
+                    Picker("Lowest score", selection: minScore) {
+                        Text("Any").tag(0)
+                        ForEach(FilterSheet.scores, id: \.self) { score in
+                            Text("\(score)+").tag(score)
+                        }
+                    }
+                } footer: {
+                    Text("Sales always show.")
                 }
                 Section {
                     Picker("Most for the trip", selection: maxTotal) {
@@ -125,6 +193,10 @@ struct FilterSheet: View {
     /// 31 reads as "Any".
     private var nightsMax: Binding<Int> {
         Binding(get: { draft.nightsMax ?? 31 }, set: { draft.nightsMax = $0 >= 31 ? nil : $0 })
+    }
+
+    private var minScore: Binding<Int> {
+        Binding(get: { draft.minScore ?? 0 }, set: { draft.minScore = $0 == 0 ? nil : $0 })
     }
 
     private var maxTotal: Binding<Int> {

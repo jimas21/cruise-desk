@@ -12,6 +12,8 @@ enum APIError: Error {
     /// 403/413/422: the server refused this request (role rule, size, schema); retrying cannot help.
     case rejected(String)
     case server(String)
+    /// 405: this deal server has no such call (an older version).
+    case unsupported
 }
 
 struct SyncResult: Decodable {
@@ -71,6 +73,45 @@ struct APIClient {
         let body: JSONValue = .object(["data": .object(fields), "ifVersion": .int(ifVersion)])
         let out = try await call("PATCH", "/v1/\(coll)/\(id)", body: body)
         return try? JSONDecoder().decode(RawDoc.self, from: out)
+    }
+
+    /// Creates a document with an id the server picks (`POST /v1/{coll}`), e.g. a tracked sailing.
+    func create(_ coll: String, data: [String: JSONValue]) async throws -> RawDoc? {
+        let out = try await call("POST", "/v1/\(coll)", body: .object(["data": .object(data)]))
+        return try? JSONDecoder().decode(RawDoc.self, from: out)
+    }
+
+    /// v3: lines, ships, size tiers and what Deal Desk can see per line. A 404 means an older server.
+    func catalog() async throws -> Catalog {
+        let data = try await call("GET", "/v1/catalog")
+        guard let value = try? JSONDecoder().decode(Catalog.self, from: data) else {
+            throw APIError.server("The catalog came back in a shape this version can't read.")
+        }
+        return value
+    }
+
+    /// v3: asks for a light refresh of the sources that allow it. Always 200; `accepted` says if it was taken.
+    func nudge(reason: String) async throws -> NudgeResult {
+        let data = try await call("POST", "/v1/refresh", body: .object(["reason": .string(reason)]))
+        return (try? JSONDecoder().decode(NudgeResult.self, from: data))
+            ?? NudgeResult(accepted: nil, requestedAt: nil, nextAllowedAt: nil)
+    }
+
+    /// v3: where the last refresh stands (asked, collector picked it up, done).
+    func refreshState() async throws -> RefreshState {
+        let data = try await call("GET", "/v1/refresh")
+        guard let value = try? JSONDecoder().decode(RefreshState.self, from: data) else {
+            throw APIError.server("The refresh status came back in a shape this version can't read.")
+        }
+        return value
+    }
+
+    /// Sailings the fare data knows for one ship, soonest first (`GET /v1/fares/sailings`), for browse-and-pick.
+    func sailings(ship: String, line: String?, limit: Int = 150) async throws -> [FareSailing] {
+        var query = [URLQueryItem(name: "ship", value: ship), URLQueryItem(name: "limit", value: String(limit))]
+        if let line { query.append(URLQueryItem(name: "line", value: line)) }
+        let data = try await call("GET", "/v1/fares/sailings", query: query)
+        return (try? JSONDecoder().decode(SailingsResult.self, from: data))?.sailings ?? []
     }
 
     func delete(_ coll: String, _ id: String, ifVersion: Int) async throws {
@@ -142,6 +183,8 @@ struct APIClient {
             throw APIError.rejected(APIClient.describe(data))
         case 404:
             throw APIError.notFound
+        case 405:
+            throw APIError.unsupported
         case 409:
             throw APIError.conflict
         case 413, 422:

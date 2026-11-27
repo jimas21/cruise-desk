@@ -35,6 +35,15 @@ struct TripPrefs: Decodable, Equatable {
     var quietHoursEnd: String? = nil
     var notes: String? = nil
     var updatedAt: String? = nil
+    // v3 (CONTRACT_V3 section 2). Sent only to a v3 deal server; an older one refuses fields it doesn't know.
+    /// nil: absent on the server, which means Royal Caribbean only. `[]` means every line.
+    var lines: [String]? = nil
+    var shipSizes: [String] = []
+    var dealTypes: [String] = []
+    var minPctUnder: Int = 15
+    var minScore: Int? = nil
+    var sailMonths: [Int] = []
+    var refreshMinutes: Int = 30
 
     /// Balcony kinds My Trip can rule out (the ids the server stores, and how they read).
     static let balconyKinds: [(id: String, title: String)] = [
@@ -46,6 +55,7 @@ struct TripPrefs: Decodable, Equatable {
         case requireOceanView, excludeBalconyTypes, adults, children, childAges, budgetTotal, tradeoffBudget
         case homeAirport, portsPreferred, portsExcluded, regions, dateFrom, dateTo, avoidHolidays, mustSeeMinScore
         case alertForMyTrip, alertMustSee, quietHoursStart, quietHoursEnd, notes, updatedAt
+        case lines, shipSizes, dealTypes, minPctUnder, minScore, sailMonths, refreshMinutes
     }
 
     init() {}
@@ -87,9 +97,33 @@ struct TripPrefs: Decodable, Equatable {
         quietHoursEnd = maybe(.quietHoursEnd, String.self)
         notes = maybe(.notes, String.self)
         updatedAt = maybe(.updatedAt, String.self)
+        lines = maybe(.lines, [String].self)
+        shipSizes = value(.shipSizes, base.shipSizes)
+        dealTypes = value(.dealTypes, base.dealTypes)
+        minPctUnder = value(.minPctUnder, base.minPctUnder)
+        minScore = maybe(.minScore, Int.self)
+        sailMonths = value(.sailMonths, base.sailMonths)
+        refreshMinutes = value(.refreshMinutes, base.refreshMinutes)
     }
 
     var party: Int { max(adults + children, 1) }
+
+    /// The lines that count: absent means Royal Caribbean only (the legacy default); empty means every line.
+    var effectiveLines: [String] { lines ?? [CruiseLine.royal] }
+
+    /// Royal Caribbean is one of the lines that count (its class settings apply only then).
+    var includesRoyal: Bool {
+        effectiveLines.isEmpty || effectiveLines.contains { CruiseLine.same($0, CruiseLine.royal) }
+    }
+
+    /// "Royal Caribbean", "Royal Caribbean & Celebrity", "Royal Caribbean +2" or "Any line".
+    var linesSummary: String {
+        let chosen = effectiveLines
+        if chosen.isEmpty { return "Any line" }
+        if chosen.count == 1 { return chosen[0] }
+        if chosen.count == 2 { return "\(chosen[0]) & \(chosen[1])" }
+        return "\(chosen[0]) +\(chosen.count - 1)"
+    }
 
     /// The same settings, trimmed to what the server accepts (schema caps, nightsMin <= nightsMax, dateFrom <=
     /// dateTo), so a save can never be refused for its shape.
@@ -140,12 +174,30 @@ struct TripPrefs: Decodable, Equatable {
         p.quietHoursEnd = quietHoursEnd.flatMap { Fmt.clock($0) }.map { Fmt.clockText($0) }
         let note = (notes ?? "").trimmed.capped(500)
         p.notes = note.isEmpty ? nil : note
+        if let chosen = lines {
+            var out: [String] = []
+            for name in chosen {
+                guard let known = CruiseLine.canonical(name), !CruiseLine.same(known, CruiseLine.other),
+                      !out.contains(known) else { continue }
+                out.append(known)
+            }
+            p.lines = Array(out.prefix(12))
+        }
+        p.shipSizes = list(shipSizes, each: 10, most: 4, allowed: ShipSize.allCases.map { $0.rawValue })
+        p.dealTypes = list(dealTypes, each: 20, most: 5, allowed: DealType.allCases.map { $0.rawValue })
+        p.minPctUnder = min(max(minPctUnder, 0), 90)
+        p.minScore = minScore.map { min(max($0, 0), 100) }
+        var months: [Int] = []
+        for month in sailMonths where (1...12).contains(month) && !months.contains(month) { months.append(month) }
+        p.sailMonths = months.sorted()
+        p.refreshMinutes = [15, 30, 60].contains(refreshMinutes) ? refreshMinutes : 30
         return p
     }
 
     /// Every field as the server stores it. Unset optional fields are sent as `null`, so a save replaces the
-    /// whole document (PATCH removes a field that is `null`; a first PUT simply leaves it out).
-    func fields(stamp: String = Fmt.stamp()) -> [String: JSONValue] {
+    /// whole document (PATCH removes a field that is `null`; a first PUT simply leaves it out). The v3 fields go
+    /// only to a v3 server (`v3`); an older one would refuse them, and its PATCH leaves them alone.
+    func fields(stamp: String = Fmt.stamp(), v3: Bool = false) -> [String: JSONValue] {
         func strings(_ items: [String]) -> JSONValue { .array(items.map { JSONValue.string($0) }) }
         func text(_ value: String?) -> JSONValue { value.map { JSONValue.string($0) } ?? .null }
         func number(_ value: Int?) -> JSONValue { value.map { JSONValue.int($0) } ?? .null }
@@ -178,15 +230,30 @@ struct TripPrefs: Decodable, Equatable {
         f["quietHoursEnd"] = text(quietHoursEnd)
         f["notes"] = text(notes)
         f["updatedAt"] = .string(stamp)
+        if v3 {
+            // A v3 app always says which lines: that is how the brain knows a v3 app has saved them.
+            f["lines"] = strings(effectiveLines)
+            f["shipSizes"] = strings(shipSizes)
+            f["dealTypes"] = strings(dealTypes)
+            f["minPctUnder"] = .int(minPctUnder)
+            f["minScore"] = number(minScore)
+            f["sailMonths"] = .array(sailMonths.map { JSONValue.int($0) })
+            f["refreshMinutes"] = .int(refreshMinutes)
+        }
         return f
     }
 
     /// One glance line for the For my trip bucket: "Icon · Oasis · 4–7 nights · Balcony, ocean view · under $3,000".
     var summary: String {
         var parts: [String] = []
+        if lines != nil { parts.append(linesSummary) }
         let classes = ShipClass.allCases.filter { shipClasses.contains($0.rawValue) }
-        if !classes.isEmpty && classes.count < ShipClass.allCases.count {
+        if includesRoyal && !classes.isEmpty && classes.count < ShipClass.allCases.count {
             parts.append(classes.map { $0.short }.joined(separator: " · "))
+        }
+        let sizes = ShipSize.allCases.filter { shipSizes.contains($0.rawValue) }
+        if !sizes.isEmpty && sizes.count < ShipSize.allCases.count {
+            parts.append(sizes.map { $0.title }.joined(separator: " or ") + " ships")
         }
         parts.append(nightsMin == nightsMax ? Fmt.nights(nightsMin) : "\(nightsMin)–\(nightsMax) nights")
         let cabins = ["interior", "oceanview", "balcony", "suite"].filter { cabinTypes.contains($0) }
@@ -229,11 +296,21 @@ enum TripCheck {
         var why: [String] = []
         var preferred = false
 
-        if let cls = d.shipClass {
+        // v3: the line must be one Jim picked (absent = Royal Caribbean only, empty = every line).
+        let lines = p.effectiveLines
+        if !lines.isEmpty && !lines.contains(where: { CruiseLine.same($0, deal.line) }) {
+            why.append(deal.line)
+        }
+        // Royal Caribbean's classes apply to Royal Caribbean deals only.
+        if deal.isRoyal, let cls = d.shipClass {
             if !p.shipClasses.isEmpty && !p.shipClasses.contains(cls) {
                 why.append(ShipClass(rawValue: cls)?.title ?? "\(cls.capitalized) class")
             }
             if p.preferredClasses.contains(cls) { preferred = true }
+        }
+        // An unknown size never fails.
+        if !p.shipSizes.isEmpty, let size = deal.sizeTier, !p.shipSizes.contains(size.rawValue) {
+            why.append(size.shipTitle)
         }
         let ship = d.ship ?? ""
         if p.excludeShips.contains(where: { !$0.trimmed.isEmpty && ship.localizedCaseInsensitiveContains($0.trimmed) }) {
@@ -263,6 +340,9 @@ enum TripCheck {
         if let sail = d.sailDate.map({ String($0.prefix(10)) }) {
             if let from = p.dateFrom, sail < from { why.append("Before \(shortDay(from))") }
             if let to = p.dateTo, sail > to { why.append("After \(shortDay(to))") }
+        }
+        if !p.sailMonths.isEmpty, let start = deal.sailDay, !p.sailMonths.contains(Fmt.month(of: start)) {
+            why.append("\(Fmt.monthShort(Fmt.month(of: start))) sailing")
         }
         if p.avoidHolidays, let start = deal.sailDay, Holidays.overlaps(start, deal.returnDay ?? start) {
             why.append("Holiday week")
@@ -377,6 +457,55 @@ enum DealSort: String, CaseIterable, Identifiable {
     }
 }
 
+/// The kinds of deal Jim can ask for (CONTRACT_V3 section 2). Worked out from a deal's own fields, never stored.
+enum DealType: String, CaseIterable, Identifiable {
+    case newLow = "new_low"
+    case underTypical = "under_typical"
+    case drop
+    case sale
+    case fitsTrip = "fits_trip"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .newLow: return "New low"
+        case .underTypical: return "% under typical"
+        case .drop: return "Price drop"
+        case .sale: return "Sale"
+        case .fitsTrip: return "Fits my trip"
+        }
+    }
+
+    /// new_low: at or under the lowest we've seen · under_typical: at least `minPctUnder`% under typical ·
+    /// drop: a price-drop deal, or cheaper than before · sale: a sale · fits_trip: passes My Trip.
+    static func of(_ deal: Deal, fits: Bool, minPctUnder: Int) -> Set<DealType> {
+        var out: Set<DealType> = []
+        let d = deal.data
+        if let price = d.pricePP, let low = d.lowestSeenPP, price > 0, price <= low { out.insert(.newLow) }
+        if let pct = deal.pctUnder, pct >= minPctUnder { out.insert(.underTypical) }
+        if deal.kind == .drop || deal.dropPP != nil { out.insert(.drop) }
+        if deal.kind == .sale { out.insert(.sale) }
+        if fits { out.insert(.fitsTrip) }
+        return out
+    }
+
+    /// True when the deal is at least one of the picked kinds (none picked means every kind).
+    static func matches(_ deal: Deal, picked: [String], fits: Bool, minPctUnder: Int) -> Bool {
+        let wanted = Set(picked.compactMap { DealType(rawValue: $0) })
+        guard !wanted.isEmpty else { return true }
+        return !of(deal, fits: fits, minPctUnder: minPctUnder).isDisjoint(with: wanted)
+    }
+}
+
+/// The minimum score: sales are exempt, and a deal with no score is never failed for it.
+enum ScoreFloor {
+    static func passes(_ deal: Deal, _ floor: Int?) -> Bool {
+        guard let floor, deal.kind != .sale, let score = deal.data.score else { return true }
+        return score >= floor
+    }
+}
+
 enum DealOrder {
     /// Best score sorts by score, then the lowest total ("ranked by value"), then newest.
     static func sorted(_ deals: [Deal], by sort: DealSort, preferred: (Deal) -> Bool = { _ in false }) -> [Deal] {
@@ -427,6 +556,12 @@ enum DealOrder {
 
 /// The filter sheet: narrows both buckets. Empty means "any".
 struct DealFilters: Codable, Equatable {
+    // v3
+    var lines: [String] = []
+    var sizes: [String] = []
+    var dealTypes: [String] = []
+    var minScore: Int? = nil
+    // v2
     var shipClasses: [String] = []
     var nightsMin: Int? = nil
     var nightsMax: Int? = nil
@@ -437,15 +572,28 @@ struct DealFilters: Codable, Equatable {
     var months: [String] = []
     var maxTotal: Int? = nil
 
+    enum CodingKeys: String, CodingKey {
+        case lines, sizes, dealTypes, minScore, shipClasses, nightsMin, nightsMax, cabinTypes, places, months, maxTotal
+    }
+
     var activeCount: Int {
-        [!shipClasses.isEmpty, nightsMin != nil || nightsMax != nil, !cabinTypes.isEmpty, !places.isEmpty,
+        [!lines.isEmpty, !sizes.isEmpty, !dealTypes.isEmpty, minScore != nil,
+         !shipClasses.isEmpty, nightsMin != nil || nightsMax != nil, !cabinTypes.isEmpty, !places.isEmpty,
          !months.isEmpty, maxTotal != nil].filter { $0 }.count
     }
 
     var isActive: Bool { activeCount > 0 }
 
-    func matches(_ deal: Deal) -> Bool {
+    /// `fits` (does it pass My Trip) and `minPctUnder` are only needed for the deal-type filter.
+    func matches(_ deal: Deal, fits: Bool = false, minPctUnder: Int = 15) -> Bool {
         let d = deal.data
+        if !lines.isEmpty {
+            guard lines.contains(where: { CruiseLine.same($0, deal.line) }) else { return false }
+        }
+        // An unknown size passes (CONTRACT_V3 rule 3).
+        if !sizes.isEmpty, let size = deal.sizeTier, !sizes.contains(size.rawValue) { return false }
+        if !DealType.matches(deal, picked: dealTypes, fits: fits, minPctUnder: minPctUnder) { return false }
+        if !ScoreFloor.passes(deal, minScore) { return false }
         if !shipClasses.isEmpty {
             guard let c = d.shipClass, shipClasses.contains(c) else { return false }
         }
@@ -474,6 +622,12 @@ struct DealFilters: Codable, Equatable {
     /// "Oasis · 5–7 nights · Balcony"
     var summary: String {
         var parts: [String] = []
+        if !lines.isEmpty { parts.append(lines.joined(separator: ", ")) }
+        let tiers = ShipSize.allCases.filter { sizes.contains($0.rawValue) }.map { $0.title }
+        if !tiers.isEmpty { parts.append(tiers.joined(separator: ", ") + " ships") }
+        let kinds = DealType.allCases.filter { dealTypes.contains($0.rawValue) }.map { $0.title }
+        if !kinds.isEmpty { parts.append(kinds.joined(separator: ", ")) }
+        if let minScore { parts.append("score \(minScore)+") }
         let classes = ShipClass.allCases.filter { shipClasses.contains($0.rawValue) }.map { $0.short }
         if !classes.isEmpty { parts.append(classes.joined(separator: ", ")) }
         switch (nightsMin, nightsMax) {
@@ -499,5 +653,23 @@ struct DealFilters: Codable, Equatable {
     func encoded() -> String {
         guard let data = try? JSONEncoder().encode(self) else { return "" }
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+extension DealFilters {
+    /// Filters saved by an older version (without the v3 keys) still read back.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        lines = c.lenient([String].self, .lines) ?? []
+        sizes = c.lenient([String].self, .sizes) ?? []
+        dealTypes = c.lenient([String].self, .dealTypes) ?? []
+        minScore = c.lenient(Int.self, .minScore)
+        shipClasses = c.lenient([String].self, .shipClasses) ?? []
+        nightsMin = c.lenient(Int.self, .nightsMin)
+        nightsMax = c.lenient(Int.self, .nightsMax)
+        cabinTypes = c.lenient([String].self, .cabinTypes) ?? []
+        places = c.lenient([String].self, .places) ?? []
+        months = c.lenient([String].self, .months) ?? []
+        maxTotal = c.lenient(Int.self, .maxTotal)
     }
 }

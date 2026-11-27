@@ -55,7 +55,7 @@ struct ReviewedView: View {
                 }
             }
             .navigationTitle("Reviewed")
-            .refreshable { await store.refresh() }
+            .refreshable { await store.refresh(reason: .pull) }
             .navigationDestination(for: String.self) { id in
                 DealDetailView(dealId: id)
             }

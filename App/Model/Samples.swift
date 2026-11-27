@@ -1,8 +1,9 @@
 import Foundation
 
 /// Made-up data for SwiftUI previews and the screenshot test: a few deals (one in the v2 shape with the full
-/// summary sheet, older ones in the v1 shape), ways to save, rules, trip settings, questions and a price history.
-/// Nothing here is a real booking or anyone's real trip.
+/// summary sheet, older ones in the v1 shape, one on another line), ways to save, rules, trip settings, questions,
+/// a price history, a v3 catalog and tracked sailings in every fill state. Nothing here is a real booking or
+/// anyone's real trip.
 enum Samples {
     static let fits: DealData = {
         var d = DealData()
@@ -184,12 +185,48 @@ enum Samples {
         return d
     }()
 
+    /// v3: a deal on another line (Celebrity), with its own class and size tier.
+    static let celebrity: DealData = {
+        var d = DealData()
+        d.kind = "fits"
+        d.line = "Celebrity"
+        d.ship = "Celebrity Beyond"
+        d.shipClass = "edge"
+        d.shipSize = "large"
+        d.sailDate = "2027-04-11"
+        d.returnDate = "2027-04-18"
+        d.nights = 7
+        d.port = "Fort Lauderdale"
+        d.roundTrip = true
+        d.region = "Eastern Caribbean"
+        d.stops = ["San Juan", "Tortola", "St. Maarten"]
+        d.cabin = "balcony"
+        d.cabinName = "Veranda"
+        d.oceanViewConfirmed = true
+        d.pricePP = 1049
+        d.priceIncludesTaxes = false
+        d.typicalPP = 1240
+        d.lowPP = 990
+        d.highPP = 1580
+        d.pctUnderTypical = 15
+        d.totalFor3 = 3150
+        d.score = 58
+        d.scoreLabel = "Good"
+        d.why = "Edge-class veranda 15% under typical"
+        d.link = "https://example.com/beyond"
+        d.linkLabel = "Example agency"
+        d.fitsTrip = true
+        d.postedAt = Fmt.stamp(Date().addingTimeInterval(-8000))
+        return d
+    }()
+
     static let deals: [Deal] = [
         Deal(id: "sample-sale", data: sale),
         Deal(id: "sample-fits", data: fits),
         Deal(id: "sample-quantum", data: quantum),
         Deal(id: "sample-call", data: call),
         Deal(id: "sample-drop", data: drop),
+        Deal(id: "sample-celebrity", data: celebrity),
     ]
 
     /// Made-up trip settings for previews: Icon, Oasis or Quantum, 5–8 nights, an ocean-view balcony, a family
@@ -212,6 +249,170 @@ enum Samples {
         p.mustSeeMinScore = 80
         return p
     }()
+
+    /// The same trip on a v3 server: Royal Caribbean and Celebrity, large and mega ships.
+    static let tripV3: TripPrefs = {
+        var p = trip
+        p.lines = ["Royal Caribbean", "Celebrity"]
+        p.shipSizes = ["large", "mega"]
+        p.minPctUnder = 10
+        return p
+    }()
+
+    // MARK: v3
+
+    /// A made-up v3 catalog: Royal Caribbean tracked live, Celebrity from alert emails, the rest news only.
+    static let catalog: Catalog = {
+        func ship(_ name: String, _ cls: String, _ slug: String, _ size: ShipSize) -> CatalogShip {
+            CatalogShip(name: name, slug: Slug.ship(name), className: cls, classSlug: slug, size: size.rawValue, gt: nil)
+        }
+        let royal = Catalog.builtIn.line(CruiseLine.royal)?.ships ?? []
+        let celebrity = [
+            ship("Celebrity Edge", "Edge", "edge", .large), ship("Celebrity Apex", "Edge", "edge", .large),
+            ship("Celebrity Beyond", "Edge", "edge", .large), ship("Celebrity Ascent", "Edge", "edge", .large),
+            ship("Celebrity Xcel", "Edge", "edge", .large),
+        ]
+        let norwegian = [
+            ship("Norwegian Prima", "Prima", "prima", .large), ship("Norwegian Viva", "Prima", "prima", .large),
+            ship("Norwegian Aqua", "Prima", "prima", .large),
+        ]
+        var lines: [CatalogLine] = [
+            CatalogLine(name: "Royal Caribbean", slug: "royal-caribbean", coverage: "tracking_live",
+                        coverageNote: "4 sources live · 412 sailings", liveSources: ["Example agency"], sailings: 412,
+                        ships: royal),
+            CatalogLine(name: "Celebrity", slug: "celebrity", coverage: "limited_data", coverageNote: "alert emails only",
+                        liveSources: [], sailings: 18, ships: celebrity),
+            CatalogLine(name: "Norwegian", slug: "norwegian", coverage: "news_only", coverageNote: "news and leads only",
+                        liveSources: [], sailings: 0, ships: norwegian),
+        ]
+        for name in CruiseLine.names where !lines.contains(where: { $0.name == name }) {
+            lines.append(CatalogLine(name: name, slug: CruiseLine.slug(name), coverage: "news_only",
+                                     coverageNote: "news and leads only", liveSources: [], sailings: 0, ships: []))
+        }
+        let sizes = ShipSize.allCases.map { CatalogSize(tier: $0.rawValue, label: $0.title, gtMin: nil, gtMax: nil) }
+        return Catalog(apiVersion: 3, catalogVersion: 1, generatedAt: Fmt.stamp(), sizes: sizes, lines: lines)
+    }()
+
+    /// Tracked sailings in each state: filled and live, still filling, a line with no price source, and sailed.
+    static let trackedStar: TrackedData = {
+        var t = TrackedData()
+        t.line = "Royal Caribbean"
+        t.ship = "Star of the Seas"
+        t.sailDate = "2027-06-12"
+        t.nights = 7
+        t.cabin = "balcony"
+        t.cabinName = "Ocean View Balcony"
+        t.addedVia = "pick"
+        t.addedAt = Fmt.stamp(Date().addingTimeInterval(-12 * 86400))
+        t.fareState = "matched"
+        t.coverage = "tracking_live"
+        t.sailingId = "star-of-the-seas-2027-06-12-7n"
+        t.pricePP = 1312
+        t.perNightPP = 187
+        t.priceIncludesTaxes = false
+        t.priceCategory = "Ocean View Balcony"
+        t.priceSource = "Example agency"
+        t.priceSeenAt = Fmt.stamp(Date().addingTimeInterval(-3 * 3600))
+        t.typicalPP = 1480
+        t.typicalN = 14
+        t.lowPP = 1190
+        t.highPP = 1720
+        t.pctUnderTypical = 11
+        t.lowestSeenPP = 1248
+        t.lowestSeenAt = Samples.isoDay(daysFromNow: -20)
+        t.history = [1460, 1420, 1395, 1248, 1330, 1376, 1340, 1312].enumerated().map { item in
+            DailyPrice(date: Samples.isoDay(daysFromNow: (item.offset - 8) * 6), pp: item.element)
+        }
+        t.embarkPort = "Port Canaveral"
+        t.returnDate = "2027-06-19"
+        t.stops = ["Perfect Day at CocoCay", "Cozumel", "Roatán"]
+        t.sources = [DealSource(name: "Example agency", url: "https://example.com/star", pricePP: 1312, includesTaxes: false)]
+        t.cabinOptions = [
+            CabinOption(category: "Interior", type: "interior", pricePP: 940, taxesIncluded: false, source: "Example agency"),
+            CabinOption(category: "Ocean View Balcony", type: "balcony", pricePP: 1312, taxesIncluded: false,
+                        source: "Example agency"),
+            CabinOption(category: "Grand Suite", type: "suite", pricePP: 3610, taxesIncluded: false, source: "Example agency"),
+        ]
+        t.filledAt = Fmt.stamp(Date().addingTimeInterval(-3 * 3600))
+        t.region = "Western Caribbean"
+        t.alerts = [
+            SiteAlert(site: "Cruise alert site", state: "set", note: "at Ocean View Balcony", at: Fmt.stamp()),
+            SiteAlert(site: "Line's own alerts", state: "needs_jim", note: "needs a free account", at: Fmt.stamp()),
+        ]
+        t.alertPrices = [AlertPrice(source: "Cruise alert site", category: "Ocean View Balcony", pricePP: 1329,
+                                    taxesIncluded: false, seenAt: Fmt.stamp(Date().addingTimeInterval(-86400)))]
+        t.brainNote = "Down $64 since last week; still above the low from the spring."
+        t.enrichedAt = Fmt.stamp(Date().addingTimeInterval(-6 * 3600))
+        return t
+    }()
+
+    static let trackedBeyond: TrackedData = {
+        var t = TrackedData()
+        t.line = "Celebrity"
+        t.ship = "Celebrity Beyond"
+        t.sailDate = "2027-11-07"
+        t.nights = 7
+        t.cabin = "balcony"
+        t.cabinName = "Veranda"
+        t.port = "Fort Lauderdale"
+        t.addedVia = "link"
+        t.link = "https://example.com/beyond-nov"
+        t.addedAt = Fmt.stamp(Date().addingTimeInterval(-2 * 86400))
+        t.fareState = "searching"
+        t.coverage = "limited_data"
+        t.typicalN = 2
+        return t
+    }()
+
+    static let trackedPrima: TrackedData = {
+        var t = TrackedData()
+        t.line = "Norwegian"
+        t.ship = "Norwegian Prima"
+        t.sailDate = "2028-02-20"
+        t.nights = 7
+        t.cabin = "oceanview"
+        t.addedVia = "pick"
+        t.addedAt = Fmt.stamp(Date().addingTimeInterval(-86400))
+        t.fareState = "no_coverage"
+        t.coverage = "news_only"
+        return t
+    }()
+
+    static let trackedSailed: TrackedData = {
+        var t = TrackedData()
+        t.line = "Royal Caribbean"
+        t.ship = "Wonder of the Seas"
+        t.sailDate = Samples.isoDay(daysFromNow: -10)
+        t.nights = 4
+        t.cabin = "balcony"
+        t.addedVia = "pick"
+        t.addedAt = Fmt.stamp(Date().addingTimeInterval(-90 * 86400))
+        t.fareState = "sailed"
+        t.coverage = "tracking_live"
+        t.pricePP = 702
+        t.lowestSeenPP = 655
+        return t
+    }()
+
+    static let tracked: [TrackedSailing] = [
+        TrackedSailing(id: "trk-sample-star", data: trackedStar),
+        TrackedSailing(id: "trk-sample-beyond", data: trackedBeyond),
+        TrackedSailing(id: "trk-sample-prima", data: trackedPrima),
+        TrackedSailing(id: "trk-sample-sailed", data: trackedSailed),
+    ]
+
+    /// Known sailings for the Track builder's browse-and-pick (the sample catalog's Star of the Seas).
+    static let sailings: [FareSailing] = [
+        ("2027-05-29", 7, 1388), ("2027-06-12", 7, 1312), ("2027-06-26", 7, 1406), ("2027-07-10", 7, 1452),
+    ].map { item in
+        FareSailing(id: "star-of-the-seas-\(item.0)-\(item.1)n", ship: "star-of-the-seas", line: "Royal Caribbean",
+                    sailDate: item.0, nights: item.1, embarkPort: "Port Canaveral",
+                    bestByClass: ["balcony": FareRow(pricePP: item.2, taxesIncluded: false, category: "Balcony",
+                                                     source: "Example agency")])
+    }
+
+    /// A shared sailing page and its title, as Safari hands them over.
+    static let sharedLink = "Star of the Seas — Jun 26, 2027 — 7-Night Caribbean https://allaboarddeals.com/cruise-lines/royal-caribbean/star-of-the-seas/2027-06-26-sample1"
 
     /// The sample Icon deal's prices over the last few months, oldest first.
     static let history: [String: [PricePoint]] = {
@@ -284,7 +485,8 @@ enum Samples {
         put("meta", "profile", .object(["lines": .array([
             .string("Balcony, ocean view preferred"), .string("5–8 nights"), .string("Newer, bigger ships"),
         ])]))
-        put("prefs", "trip", .object(trip.fields(stamp: Fmt.stamp(Date().addingTimeInterval(-86400)))))
+        put("prefs", "trip", .object(tripV3.fields(stamp: Fmt.stamp(Date().addingTimeInterval(-86400)), v3: true)))
+        for item in tracked { put("tracked", item.id, JSONValue(encoding: item.data)) }
         put("questions", "q-sample-answered", .object([
             "dealId": .string("sample-fits"),
             "text": .string("Is the ocean-view balcony worth it over an interior cabin for us?"),
@@ -307,7 +509,7 @@ enum Samples {
         return colls
     }
 
-    private static func isoDay(daysFromNow days: Int) -> String {
+    static func isoDay(daysFromNow days: Int) -> String {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX")

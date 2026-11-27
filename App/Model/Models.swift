@@ -154,6 +154,9 @@ struct DealData: Codable, Hashable {
     var scoop: String?
     var fitsTrip: Bool?
     var failsBecause: [String]?
+    // v3: any cruise line (absent = Royal Caribbean) and the cross-line size tier
+    var line: String?
+    var shipSize: String?
 }
 
 struct Deal: Identifiable, Hashable {
@@ -206,9 +209,41 @@ struct Deal: Identifiable, Hashable {
         return previous - now
     }
 
-    // MARK: v2 summary sheet
+    // MARK: v3 any line
 
-    var shipClass: ShipClass? { data.shipClass.flatMap { ShipClass(rawValue: $0) } }
+    /// The deal's cruise line; absent means Royal Caribbean.
+    var line: String { CruiseLine.resolved(data.line) }
+    var isRoyal: Bool { CruiseLine.isRoyal(data.line) }
+
+    /// Royal Caribbean's own class (icon, oasis, quantum, other); nil on every other line.
+    var shipClass: ShipClass? {
+        guard isRoyal else { return nil }
+        return data.shipClass.flatMap { ShipClass(rawValue: $0) }
+    }
+
+    /// "Icon class" or "Smaller ship" on Royal, the other line's own class ("Edge class") elsewhere.
+    var classTitle: String? {
+        if isRoyal { return shipClass?.title }
+        return CatalogIndex.current.classTitle(line: line, classSlug: data.shipClass, ship: data.ship)
+    }
+
+    /// The size tier: the deal's own, else the catalog's for that ship. Nil when unknown.
+    var sizeTier: ShipSize? {
+        // The deal's own value wins, even one this version doesn't know (then the size is unknown here).
+        if let raw = data.shipSize?.trimmed, !raw.isEmpty { return ShipSize(rawValue: raw) }
+        guard kind != .sale else { return nil }
+        return CatalogIndex.current.size(line: line, ship: data.ship)
+    }
+
+    /// "Mega ship", or an unknown tier shown plainly.
+    var sizeTitle: String? { sizeTier?.shipTitle ?? ShipSize.shipTitle(data.shipSize) }
+
+    /// "Royal Caribbean · Mega ship": the small line above the ship's name.
+    var eyebrow: String {
+        [line, kind == .sale ? nil : sizeTitle].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    // MARK: v2 summary sheet
 
     /// The typical price per person: v2 `typicalPP`, or v1 `usualPP` on older deals.
     var typicalPP: Int? { data.typicalPP ?? data.usualPP }
@@ -657,6 +692,7 @@ struct RunStatus: Hashable {
 }
 
 struct WatchData: Codable, Hashable {
+    var line: String?
     var ship: String?
     var sailDate: String?
     var nights: Int?

@@ -2,6 +2,7 @@ import SwiftUI
 
 /// The summary sheet (DESIGN_V2 section 3): everything needed to judge a deal at a glance, calm and in order.
 ///
+///     Royal Caribbean · Mega ship
 ///     Icon of the Seas · Icon class                         ( 78 ) Great
 ///     Sun Sep 5 – Sat Sep 11, 2027 · 6 nights
 ///     Galveston → Cozumel · Roatán · Costa Maya → Galveston
@@ -41,6 +42,7 @@ struct DealRow: View {
                     Spacer(minLength: 8)
                     chip
                 }
+                eyebrow
                 name
             }
         } else {
@@ -48,6 +50,7 @@ struct DealRow: View {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     pill
+                    eyebrow
                     name
                     if deal.kind != .sale, !deal.datesLine.isEmpty {
                         // One line when it fits; otherwise the dates, then the nights, never a dangling "·".
@@ -74,20 +77,28 @@ struct DealRow: View {
         }
     }
 
+    /// "Royal Caribbean · Mega ship": the line (and the ship's size) above its name.
+    private var eyebrow: some View {
+        Text(deal.eyebrow)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+    }
+
     /// "Icon of the Seas · Icon class" on one line when it fits, else the class on its own line below.
     @ViewBuilder
     private var name: some View {
         let lines = typeSize.isAccessibilitySize ? 4 : 2
-        if deal.kind != .sale, let shipClass = deal.shipClass {
+        if deal.kind != .sale, let shipClass = deal.classTitle {
             ViewThatFits(in: .horizontal) {
                 (Text(deal.title).font(.headline)
-                    + Text("  ·  \(shipClass.title)").font(.subheadline).foregroundStyle(.secondary))
+                    + Text("  ·  \(shipClass)").font(.subheadline).foregroundStyle(.secondary))
                     .lineLimit(1)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(deal.title)
                         .font(.headline)
                         .lineLimit(lines)
-                    Text(shipClass.title)
+                    Text(shipClass)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

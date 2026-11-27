@@ -128,7 +128,7 @@ struct DealsView: View {
                 }
             }
             .refreshable {
-                await store.refresh()
+                await store.refresh(reason: .pull)
             }
             .navigationDestination(for: String.self) { id in
                 DealDetailView(dealId: id)
@@ -140,7 +140,8 @@ struct DealsView: View {
                 NavigationStack { SettingsView() }
             }
             .sheet(isPresented: $showFilters) {
-                FilterSheet(filters: filtersBinding, deals: store.inbox)
+                FilterSheet(filters: filtersBinding, deals: store.inbox, myLines: store.trip?.effectiveLines ?? [],
+                            minPctUnder: store.trip?.minPctUnder ?? 15, fits: { store.fit($0).fits })
             }
             .sheet(isPresented: $showTrip) {
                 TripEditor(start: store.trip ?? TripPrefs(), isNew: store.trip == nil)

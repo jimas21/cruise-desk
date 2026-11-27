@@ -86,7 +86,26 @@ struct SettingsView: View {
             }
 
             Section {
+                InfoRow(label: "Deal server", value: levelText)
+                NavigationLink {
+                    LinesView()
+                } label: {
+                    ValueLabel(label: "My Lines", value: store.isV3 ? (store.trip?.linesSummary ?? CruiseLine.royal)
+                                                                   : "coming soon")
+                }
+            } header: {
+                Text("Lines and tracking")
+            } footer: {
+                Text(store.isV3
+                     ? "Opening the app asks the deal server for a fresh look at the sources that allow it, at most every 5 minutes."
+                     : "Any cruise line, tracking and per-line coverage switch on by themselves once the deal server's next update lands.")
+            }
+
+            Section {
                 InfoRow(label: "Deals on this phone", value: String(store.cachedDealCount))
+                if store.isV3 {
+                    InfoRow(label: "Tracked sailings", value: String(store.tracked.count))
+                }
                 if store.pendingCount > 0 {
                     InfoRow(label: "Waiting to send", value: String(store.pendingCount))
                 }
@@ -128,6 +147,14 @@ struct SettingsView: View {
         if !Connection.isConfigured { return "Not set up. Paste the server address and the app token." }
         if Connection.isCustom { return "Using the address or token you pasted. They stay on this phone, in the Keychain." }
         return "Using the address and token built into this version of the app."
+    }
+
+    private var levelText: String {
+        switch store.level {
+        case .v3: return "Lines and tracking on"
+        case .v2: return "Tracking coming soon"
+        case .unknown: return "Checking…"
+        }
     }
 
     private var alertsText: String {

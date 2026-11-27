@@ -77,7 +77,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             if isAnswer {
                 Router.shared.openAnswer(dealId, store: Store.shared)
             } else if let dealId {
-                Router.shared.openDeal(dealId)
+                Router.shared.openPushed(dealId, store: Store.shared)
             }
             Store.shared.kick()
         }
@@ -95,12 +95,32 @@ final class Router: ObservableObject {
     @Published var askFocus: String?
     /// The general "Ask Deal Desk" thread.
     @Published var showAsk = false
+    /// The Tracking tab's navigation.
+    @Published var trackingPath: [String] = []
+    /// Opens the Track builder (empty, from a deal, or from a link).
+    @Published var trackSeed: TrackSeed?
 
     func openDeal(_ id: String) {
         guard Router.isValidId(id) else { return }
         tab = .deals
         showAsk = false
         dealsPath = [id]
+    }
+
+    func openTracked(_ id: String) {
+        guard Router.isValidId(id) else { return }
+        tab = .tracking
+        showAsk = false
+        trackingPath = [id]
+    }
+
+    /// A push names a deal, or for a tracked sailing's price move, the tracked sailing itself.
+    func openPushed(_ id: String, store: Store) {
+        if store.deal(id) == nil, store.trackedSailing(id) != nil {
+            openTracked(id)
+        } else {
+            openDeal(id)
+        }
     }
 
     /// Opens a deal at its Ask thread, or the general thread when there is no deal.
@@ -129,7 +149,8 @@ final class Router: ObservableObject {
         }
     }
 
-    /// `dealdesk://deal/<id>`, `dealdesk://deal/<id>/ask` and `dealdesk://ask`
+    /// `dealdesk://deal/<id>`, `dealdesk://deal/<id>/ask`, `dealdesk://ask`, `dealdesk://tracked/<id>` and
+    /// `dealdesk://track?link=<a sailing page>` (a Shortcut can hand a page over this way).
     func handle(url: URL) {
         guard url.scheme?.lowercased() == "dealdesk" else { return }
         let parts = url.pathComponents.filter { $0 != "/" }
@@ -143,6 +164,14 @@ final class Router: ObservableObject {
             }
         case "ask":
             openThread(dealId: nil)
+        case "tracked":
+            if let id = parts.first { openTracked(id) }
+        case "track":
+            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let text = items.first { $0.name == "link" || $0.name == "url" || $0.name == "text" }?.value
+            tab = .tracking
+            showAsk = false
+            trackSeed = TrackSeed(pick: nil, text: text?.trimmed.isEmpty == false ? text : nil)
         default:
             break
         }
@@ -158,7 +187,7 @@ final class Router: ObservableObject {
 }
 
 enum AppTab: Hashable {
-    case deals, reviewed, save, rules
+    case deals, tracking, reviewed, save, rules
 }
 
 enum Haptics {

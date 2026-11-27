@@ -1,8 +1,10 @@
 import SwiftUI
 
-/// My Trip (DESIGN_V2 section 1): every trip setting in plain words, with chips, steppers, toggles and a slider.
-/// The count at the top moves as you change things; Save writes `prefs/trip`, the buckets re-sort at once, and
-/// Claude uses the same settings on its next check.
+/// My Trip (DESIGN_V2 section 1, DESIGN_V3 section 3): every trip setting in plain words, with chips, steppers,
+/// toggles and a slider: lines, ship sizes, Royal classes, length, cabin, who's going, budget, ports and regions,
+/// dates and sail months, what counts as a deal, alerts and how often to check. The count at the top moves as you
+/// change things; Save writes `prefs/trip`, the buckets re-sort at once, and Claude uses the same settings on its
+/// next check. The v3 settings show only once the deal server can keep them.
 struct TripEditor: View {
     let isNew: Bool
     /// What the screen opened with, so a phone with no `prefs/trip` yet cannot save the generic starting values
@@ -68,6 +70,11 @@ struct TripEditor: View {
         NavigationStack {
             Form {
                 countSection
+                if store.isV3 {
+                    linesSection
+                } else {
+                    comingSoonSection
+                }
                 shipsSection
                 lengthSection
                 cabinSection
@@ -75,7 +82,13 @@ struct TripEditor: View {
                 budgetSection
                 placesSection
                 datesSection
+                if store.isV3 {
+                    dealsSection
+                }
                 alertsSection
+                if store.isV3 {
+                    checksSection
+                }
                 Section {
                     TextField("Anything else Claude should weigh", text: notes, axis: .vertical)
                         .lineLimit(2...6)
@@ -93,7 +106,8 @@ struct TripEditor: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { save() }
                         .fontWeight(.semibold)
-                        .disabled(draft.shipClasses.isEmpty || draft.cabinTypes.isEmpty || untouchedStart)
+                        .disabled((showsRoyalClasses && draft.shipClasses.isEmpty) || draft.cabinTypes.isEmpty
+                                  || untouchedStart)
                 }
             }
         }
@@ -131,22 +145,130 @@ struct TripEditor: View {
         }
     }
 
-    private var shipsSection: some View {
-        Group {
-            Section {
-                ChipPicker(options: classOptions, selection: chosen(\.shipClasses, order: classIds))
-            } header: {
-                Text("Ship classes")
-            } footer: {
-                if draft.shipClasses.isEmpty {
-                    Text("Pick at least one.").foregroundStyle(Palette.call)
-                } else {
-                    Text("Icon is the newest and biggest, then Oasis, then Quantum.")
+    // MARK: v3: lines, sizes, what counts as a deal, checks
+
+    private var comingSoonSection: some View {
+        Section {
+            Label {
+                Text("Any cruise line, ship sizes, sail months and the kinds of deal to show arrive with the deal server's next update.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } icon: {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(Palette.accent)
+            }
+        } header: {
+            Text("Coming soon")
+        }
+    }
+
+    private var linesSection: some View {
+        Section {
+            NavigationLink {
+                LinesView(selection: linesBinding)
+            } label: {
+                ValueLabel(label: "Lines", value: draft.linesSummary)
+            }
+        } header: {
+            Text("My lines")
+        } footer: {
+            Text("For my trip and Claude's checks cover these lines. Royal Caribbean is fully covered; others fill in as their sources come online.")
+        }
+    }
+
+    private var linesBinding: Binding<[String]> {
+        Binding(get: { draft.effectiveLines }, set: { draft.lines = $0 })
+    }
+
+    /// Royal Caribbean's own classes matter only while Royal Caribbean is one of the lines.
+    private var showsRoyalClasses: Bool { !store.isV3 || draft.includesRoyal }
+
+    private var sizeIds: [String] { ShipSize.allCases.map { $0.rawValue } }
+
+    private var dealsSection: some View {
+        Section {
+            ChipPicker(options: DealType.allCases.map { ReasonOption(id: $0.rawValue, title: $0.title) },
+                       selection: chosen(\.dealTypes, order: DealType.allCases.map { $0.rawValue }))
+            Stepper(value: $draft.minPctUnder, in: 0...90, step: 5) {
+                ValueLabel(label: "Under typical by", value: "\(draft.minPctUnder)% or more")
+            }
+            Toggle("Lowest score", isOn: minScoreOn)
+            if let floor = draft.minScore {
+                VStack(alignment: .leading, spacing: 4) {
+                    ValueLabel(label: "Show deals from", value: "\(floor)")
+                    Slider(value: minScoreValue, in: 0...100, step: 5)
+                        .accessibilityLabel(Text("Lowest score"))
+                        .accessibilityValue(Text("\(floor)"))
                 }
             }
-            Section("Rank these first") {
-                ChipPicker(options: classOptions.filter { draft.shipClasses.contains($0.id) },
-                           selection: chosen(\.preferredClasses, order: classIds))
+        } header: {
+            Text("What counts as a deal")
+        } footer: {
+            Text("Best deals shows a deal that is at least one of the kinds picked; none picked means every kind. The lowest score applies to both lists; sales always show.")
+        }
+    }
+
+    private var minScoreOn: Binding<Bool> {
+        Binding(get: { draft.minScore != nil }, set: { draft.minScore = $0 ? 60 : nil })
+    }
+
+    private var minScoreValue: Binding<Double> {
+        Binding(get: { Double(draft.minScore ?? 60) }, set: { draft.minScore = Int($0.rounded()) })
+    }
+
+    private var checksSection: some View {
+        Section {
+            Picker("Check every", selection: $draft.refreshMinutes) {
+                Text("15 min").tag(15)
+                Text("30 min").tag(30)
+                Text("60 min").tag(60)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel(Text("Check every"))
+        } header: {
+            Text("Background checks")
+        } footer: {
+            Text("How often Deal Desk re-reads the sources that allow it, your tracked sailings first. Opening the app also asks for a fresh look.")
+        }
+    }
+
+    private var monthIds: [String] { (1...12).map { String($0) } }
+
+    private var sailMonthsBinding: Binding<Set<String>> {
+        Binding(get: { Set(draft.sailMonths.map { String($0) }) },
+                set: { picked in draft.sailMonths = (1...12).filter { picked.contains(String($0)) } })
+    }
+
+    // MARK: Ships
+
+    private var shipsSection: some View {
+        Group {
+            if store.isV3 {
+                Section {
+                    ChipPicker(options: ShipSize.allCases.map { ReasonOption(id: $0.rawValue, title: $0.title) },
+                               selection: chosen(\.shipSizes, order: sizeIds))
+                } header: {
+                    Text("Ship size")
+                } footer: {
+                    Text("None picked means any size. Small is under 70k tons, mid-size to 120k, large to 180k, mega above.")
+                }
+            }
+            if showsRoyalClasses {
+                Section {
+                    ChipPicker(options: classOptions, selection: chosen(\.shipClasses, order: classIds))
+                } header: {
+                    Text(store.isV3 ? "Royal Caribbean classes" : "Ship classes")
+                } footer: {
+                    if draft.shipClasses.isEmpty {
+                        Text("Pick at least one.").foregroundStyle(Palette.call)
+                    } else {
+                        Text("Icon is the newest and biggest, then Oasis, then Quantum.")
+                    }
+                }
+                Section("Rank these first") {
+                    ChipPicker(options: classOptions.filter { draft.shipClasses.contains($0.id) },
+                               selection: chosen(\.preferredClasses, order: classIds))
+                }
             }
             Section("Ships to skip") {
                 ForEach(draft.excludeShips, id: \.self) { ship in
@@ -290,10 +412,18 @@ struct TripEditor: View {
                            displayedComponents: .date)
             }
             Toggle("Avoid holiday weeks", isOn: $draft.avoidHolidays)
+            if store.isV3 {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Sail months")
+                    ChipPicker(options: monthIds.map { ReasonOption(id: $0, title: Fmt.monthShort(Int($0) ?? 0)) },
+                               selection: sailMonthsBinding)
+                }
+            }
         } header: {
             Text("When")
         } footer: {
-            Text("Holiday weeks: Thanksgiving, Christmas to New Year, and July 4th.")
+            Text(store.isV3 ? "Holiday weeks: Thanksgiving, Christmas to New Year, and July 4th. No sail month picked means any month."
+                            : "Holiday weeks: Thanksgiving, Christmas to New Year, and July 4th.")
         }
     }
 

@@ -19,6 +19,7 @@ enum Problem: Equatable {
         case .server(let why)?: self = .server(why)
         case .notFound?: self = .server("The server doesn't know that address. Check Settings.")
         case .conflict?: self = .server("Something changed at the same time. Pull to refresh.")
+        case .unsupported?: self = .server("This deal server doesn't support that yet.")
         case nil: self = .offline(error.localizedDescription)
         }
     }
@@ -51,12 +52,34 @@ enum Problem: Equatable {
     }
 }
 
+/// What the deal server can do. v3 adds lines, tracking, coverage and the refresh nudge (CONTRACT_V3 section 8);
+/// until `GET /v1/catalog` says so the app keeps v2 behaviour.
+enum ServerLevel: String {
+    case unknown, v2, v3
+}
+
+/// Why the app asks the server for a light refresh (`POST /v1/refresh`).
+enum RefreshReason: String {
+    case open, pull, track
+}
+
+/// What `Store.track` did with a pick.
+enum TrackOutcome: Equatable {
+    case added(String)
+    case already(String)
+    case comingSoon
+    case full
+    case invalid(String)
+}
+
 /// A change made on this phone that has not reached the server yet. Kept on disk, sent in order.
 struct PendingWrite: Codable, Identifiable {
     enum Op: String, Codable {
         /// PATCH when the document exists (with its version), otherwise PUT to create it.
         case upsert
         case delete
+        /// POST: a new document whose id the server picks (a tracked sailing). `docId` is a stand-in on this phone.
+        case create
     }
 
     var id: UUID
@@ -80,12 +103,19 @@ struct CacheFile: Codable {
     var serverTime: String?
     var savedAt: Date?
     var colls: [String: [String: RawDoc]] = [:]
+    // v3
+    var level: String?
+    var catalog: Catalog?
+    var catalogAt: Date?
 }
 
 /// The app's single source of truth: the on-disk cache merged from `/v1/sync`, with queued writes laid on top.
 @MainActor
 final class Store: ObservableObject {
     static let shared = Store()
+
+    /// The most sailings the server keeps tracked.
+    static let trackedLimit = 50
 
     @Published private(set) var deals: [Deal] = []
     @Published private(set) var feedback: [String: Feedback] = [:]
@@ -108,19 +138,33 @@ final class Store: ObservableObject {
     /// A one-off message, such as a change the server refused.
     @Published var notice: String?
     @Published var pushProblem: String?
+    // v3
+    /// Jim's tracked sailings: coming up first, sailed ones last.
+    @Published private(set) var tracked: [TrackedSailing] = []
+    @Published private(set) var level: ServerLevel = .unknown
+    /// The server's catalog in v3, else the built-in copy (line names and the Royal fleet).
+    @Published private(set) var catalog: Catalog = .builtIn
+    /// The last refresh nudge and when it was sent.
+    @Published private(set) var nudge: NudgeResult?
+    @Published private(set) var nudgedAt: Date?
+    @Published private(set) var refreshState: RefreshState?
 
     private var dealIndex: [String: Deal] = [:]
     private var cache: CacheFile
     private var queue: [PendingWrite]
     private let isPreview: Bool
     private var rerunRequested = false
+    private var rerunReason: RefreshReason?
     private var askedForPush = false
     private var monitor: NWPathMonitor?
+    private var isForeground = true
+    private var followUp: Task<Void, Never>?
 
     private static let cacheFile = "cache.json"
     private static let queueFile = "queue.json"
+    private static let nudgeKey = "refresh.lastNudge"
 
-    init(previewDocs: [String: [String: RawDoc]]? = nil) {
+    init(previewDocs: [String: [String: RawDoc]]? = nil, level previewLevel: ServerLevel = .v3) {
         if let previewDocs {
             isPreview = true
             cache = CacheFile(serverTime: nil, savedAt: Date(), colls: previewDocs)
@@ -133,6 +177,14 @@ final class Store: ObservableObject {
             queue = Disk.load([PendingWrite].self, from: Store.queueFile) ?? []
         }
         lastSync = cache.savedAt
+        if isPreview {
+            level = previewLevel
+            catalog = previewLevel == .v3 ? Samples.catalog : .builtIn
+        } else {
+            level = cache.level.flatMap { ServerLevel(rawValue: $0) } ?? .unknown
+            catalog = (level == .v3 ? cache.catalog : nil) ?? .builtIn
+        }
+        CatalogIndex.current = catalog
         rebuild()
         if !isPreview { startMonitor() }
     }
@@ -149,6 +201,9 @@ final class Store: ObservableObject {
     var pendingCount: Int { queue.count }
     var cachedDealCount: Int { cache.colls["deals"]?.count ?? 0 }
 
+    /// The deal server has v3: lines, tracking, coverage, the refresh nudge.
+    var isV3: Bool { level == .v3 }
+
     func deal(_ id: String) -> Deal? { dealIndex[id] }
 
     func reviewed(_ verdict: Verdict) -> [Deal] {
@@ -161,17 +216,30 @@ final class Store: ObservableObject {
         pendingKeys.contains("\(coll)/\(id)")
     }
 
-    // MARK: - Buckets (DESIGN_V2 section 2)
+    // MARK: - Buckets (DESIGN_V2 section 2, CONTRACT_V3 section 2)
 
     /// Does this deal fit My Trip? Worked out live from `prefs/trip`, so the buckets move as soon as it changes.
     func fit(_ deal: Deal) -> TripFit {
         TripCheck.verdict(for: deal, prefs: trip)
     }
 
-    /// The Deals tab: unanswered deals in one bucket, narrowed by the filters and sorted.
+    /// The Deals tab: unanswered deals in one bucket, narrowed by the filters and sorted. Best deals keeps the deal
+    /// kinds My Trip asks for (none picked = all) above its minimum score (sales exempt); For my trip keeps the
+    /// deals that pass My Trip and the minimum score.
     func bucket(_ bucket: DealBucket, filters: DealFilters, sort: DealSort) -> [Deal] {
-        var list = inbox.filter { filters.matches($0) }
-        if bucket == .trip { list = list.filter { fit($0).fits } }
+        let minPct = trip?.minPctUnder ?? 15
+        let floor = trip?.minScore
+        var list = inbox.filter { filters.matches($0, fits: fit($0).fits, minPctUnder: minPct) }
+        switch bucket {
+        case .best:
+            let kinds = trip?.dealTypes ?? []
+            list = list.filter { deal in
+                DealType.matches(deal, picked: kinds, fits: fit(deal).fits, minPctUnder: minPct)
+                    && ScoreFloor.passes(deal, floor)
+            }
+        case .trip:
+            list = list.filter { fit($0).fits && ScoreFloor.passes($0, floor) }
+        }
         return DealOrder.sorted(list, by: sort, preferred: { self.fit($0).preferred })
     }
 
@@ -189,22 +257,133 @@ final class Store: ObservableObject {
         thread(dealId).contains { !$0.isAnswered && Date().timeIntervalSince($0.asked) < 600 }
     }
 
+    // MARK: - Tracked sailings (CONTRACT_V3 sections 2 and 4)
+
+    func trackedSailing(_ id: String) -> TrackedSailing? { tracked.first { $0.id == id } }
+
+    func trackedMatch(key: String) -> TrackedSailing? { tracked.first { $0.key == key } }
+
+    /// The tracked sailing for a deal's sailing and cabin, if Jim tracks it.
+    func trackedMatch(for deal: Deal) -> TrackedSailing? {
+        guard deal.kind != .sale, deal.data.cabin != nil else { return nil }
+        let key = TrackKey.make(line: deal.line, ship: deal.data.ship, sailDate: deal.data.sailDate,
+                                nights: deal.data.nights, cabin: deal.data.cabin)
+        return trackedMatch(key: key)
+    }
+
+    /// Tracks a sailing. It shows at once with every price "filling…"; the server fills it from its fare data and
+    /// Claude adds the rest. Never queued against an older server.
+    @discardableResult
+    func track(_ pick: TrackPick) -> TrackOutcome {
+        guard isV3 else { return .comingSoon }
+        if let problem = pick.problem { return .invalid(problem) }
+        if let existing = trackedMatch(key: pick.key) { return .already(existing.id) }
+        guard tracked.count < Store.trackedLimit else { return .full }
+        let id = Store.newId(prefix: "local")
+        enqueue(.create, "tracked", id, pick.fields(), reason: .track)
+        Haptics.success()
+        return .added(id)
+    }
+
+    /// Changes the extras on a tracked sailing (the app may change only these). Changing the line, ship, date,
+    /// nights or cabin is stop-and-track-again.
+    func editTracked(_ item: TrackedSailing, cabinName: String, port: String, link: String, note: String) {
+        guard isV3 else { return }
+        var fields: [String: JSONValue] = [:]
+        func set(_ key: String, _ value: String, _ cap: Int) {
+            let text = value.trimmed.capped(cap)
+            fields[key] = text.isEmpty ? .null : .string(text)
+        }
+        set("cabinName", cabinName, 40)
+        set("port", port, 30)
+        set("note", note, 120)
+        fields["link"] = TrackPick.validLink(link).map { JSONValue.string($0) } ?? .null
+        if let index = queue.firstIndex(where: { $0.op == .create && $0.coll == "tracked" && $0.docId == item.id }) {
+            // Not on the server yet: change the pick that will be sent.
+            for (key, value) in fields {
+                if value == .null {
+                    queue[index].fields.removeValue(forKey: key)
+                } else {
+                    queue[index].fields[key] = value
+                }
+            }
+            saveQueue()
+            rebuild()
+        } else {
+            enqueue(.upsert, "tracked", item.id, fields)
+        }
+        Haptics.success()
+    }
+
+    func stopTracking(_ item: TrackedSailing) {
+        guard isV3 else { return }
+        // While a sync is sending the head of the queue, that write is already on its way.
+        let sending = syncing ? queue.first?.id : nil
+        queue.removeAll { $0.coll == "tracked" && $0.docId == item.id && $0.id != sending }
+        if item.isLocal && queue.contains(where: { $0.coll == "tracked" && $0.docId == item.id }) {
+            // Its create is on its way right now; delete the server's copy once it lands.
+            stopAfterCreate.insert(item.id)
+        }
+        if !item.isLocal {
+            queue.append(PendingWrite(op: .delete, coll: "tracked", docId: item.id, fields: [:]))
+        }
+        saveQueue()
+        rebuild()
+        kick()
+        Haptics.tap()
+    }
+
+    /// Stand-in ids whose create was already being sent when Jim stopped tracking them.
+    private var stopAfterCreate: Set<String> = []
+
+    /// Sailings the fare data knows for a ship, soonest first, for the Track builder's browse-and-pick.
+    func knownSailings(line: String, ship: String) async -> [FareSailing] {
+        let key = Slug.ship(ship)
+        guard !key.isEmpty else { return [] }
+        let list: [FareSailing]
+        if isPreview {
+            list = Samples.sailings
+        } else {
+            guard let client = Connection.client() else { return [] }
+            list = (try? await client.sailings(ship: key, line: line)) ?? []
+        }
+        // An older server ignores `line`; keep only this line's rows for this exact ship, still to come.
+        return list.filter { sailing in
+            guard CruiseLine.same(CruiseLine.resolved(sailing.line), line) else { return false }
+            let ships = [sailing.ship, sailing.shipName].compactMap { $0 }.map { Slug.ship($0) }
+            guard ships.isEmpty || ships.contains(key) else { return false }
+            guard let day = sailing.sailDay else { return false }
+            return Fmt.daysLeft(day) >= 0
+        }
+        .sorted { ($0.sailDate ?? "") < ($1.sailDate ?? "") }
+    }
+
     // MARK: - Sync
 
-    func kick() {
-        Task { await refresh() }
+    func kick(reason: RefreshReason? = nil) {
+        Task { await refresh(reason: reason) }
     }
 
     func foregrounded() {
+        isForeground = true
         if let lastSync, Date().timeIntervalSince(lastSync) < 30, queue.isEmpty, problem == nil { return }
-        kick()
+        kick(reason: .open)
     }
 
-    /// Sends queued writes, then pulls everything that changed since the last sync.
-    func refresh() async {
+    func backgrounded() {
+        isForeground = false
+        followUp?.cancel()
+        followUp = nil
+    }
+
+    /// Sends queued writes, pulls everything that changed since the last sync, checks what the server can do
+    /// (`GET /v1/catalog`, at most every 6 hours and on every pull), then on a v3 server asks for a light refresh
+    /// of the sources that allow it (CONTRACT_V3 section 5).
+    func refresh(reason: RefreshReason? = nil) async {
         if isPreview { return }
         if syncing {
             rerunRequested = true
+            if let reason { rerunReason = reason }
             return
         }
         guard let client = Connection.client() else {
@@ -217,6 +396,8 @@ final class Store: ObservableObject {
             try await pull(client)
             problem = nil
             lastSync = Date()
+            await checkCatalog(client, force: reason == .pull)
+            if let reason { await sendNudge(client, reason) }
             if !askedForPush {
                 askedForPush = true
                 await Push.requestIfNeeded()
@@ -227,7 +408,9 @@ final class Store: ObservableObject {
         syncing = false
         if rerunRequested {
             rerunRequested = false
-            if !queue.isEmpty { await refresh() }
+            let next = rerunReason
+            rerunReason = nil
+            if !queue.isEmpty || next != nil { await refresh(reason: next) }
         }
     }
 
@@ -248,6 +431,83 @@ final class Store: ObservableObject {
         cache.savedAt = Date()
         saveCache()
         rebuild()
+    }
+
+    /// v3 mode is on only when `GET /v1/catalog` answers with apiVersion 3 or more; a 404 or 405 means an older
+    /// server. A network blip changes nothing.
+    private func checkCatalog(_ client: APIClient, force: Bool) async {
+        if !force, level != .unknown, let at = cache.catalogAt, Date().timeIntervalSince(at) < 6 * 3600 { return }
+        do {
+            let fresh = try await client.catalog()
+            cache.catalogAt = Date()
+            cache.catalog = fresh.isV3 ? fresh : nil
+            setLevel(fresh.isV3 ? .v3 : .v2)
+        } catch APIError.notFound {
+            cache.catalogAt = Date()
+            cache.catalog = nil
+            setLevel(.v2)
+        } catch APIError.unsupported {
+            cache.catalogAt = Date()
+            cache.catalog = nil
+            setLevel(.v2)
+        } catch {
+            return
+        }
+        saveCache()
+    }
+
+    private func setLevel(_ new: ServerLevel) {
+        level = new
+        cache.level = new.rawValue
+        catalog = (new == .v3 ? cache.catalog : nil) ?? .builtIn
+        CatalogIndex.current = catalog
+        rebuild()
+    }
+
+    private var lastNudgeAt: Date? {
+        get {
+            let value = UserDefaults.standard.double(forKey: Store.nudgeKey)
+            return value > 0 ? Date(timeIntervalSince1970: value) : nil
+        }
+        set { UserDefaults.standard.set(newValue?.timeIntervalSince1970 ?? 0, forKey: Store.nudgeKey) }
+    }
+
+    /// `POST /v1/refresh` on a v3 server: on open at most every 5 minutes; a pull or a new tracked sailing always
+    /// asks (the server itself takes one nudge per 5 minutes). If it was accepted, sync again 90 s later while the
+    /// app is still open.
+    private func sendNudge(_ client: APIClient, _ reason: RefreshReason) async {
+        guard level == .v3 else { return }
+        if reason == .open, let last = lastNudgeAt, Date().timeIntervalSince(last) < 300 { return }
+        do {
+            let result = try await client.nudge(reason: reason.rawValue)
+            lastNudgeAt = Date()
+            nudge = result
+            nudgedAt = Date()
+            if result.accepted == true { scheduleFollowUp() }
+        } catch APIError.notFound {
+            setLevel(.v2)
+            saveCache()
+        } catch APIError.unsupported {
+            setLevel(.v2)
+            saveCache()
+        } catch {
+            // A refresh nudge is a nicety; the sync already happened.
+        }
+    }
+
+    private func scheduleFollowUp() {
+        followUp?.cancel()
+        followUp = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 90_000_000_000)
+            guard let self, !Task.isCancelled, self.isForeground else { return }
+            await self.refresh()
+        }
+    }
+
+    /// For the status sheet: where the last refresh stands on the server.
+    func loadRefreshState() async {
+        guard !isPreview, isV3, let client = Connection.client() else { return }
+        if let state = try? await client.refreshState() { refreshState = state }
     }
 
     // MARK: - Writes
@@ -299,13 +559,26 @@ final class Store: ObservableObject {
     /// One write. On 409 (or 404) it re-syncs and tries once more with the fresh version.
     private func send(_ write: PendingWrite, _ client: APIClient, retry: Bool) async -> Outcome {
         let current = cache.colls[write.coll]?[write.docId]
+        let isTracked = write.coll == "tracked"
         do {
             switch write.op {
+            case .create:
+                let data = write.fields.compactMapValues { value -> JSONValue? in value == .null ? nil : value }
+                if let saved = try await client.create(write.coll, data: data) {
+                    cache.colls[write.coll, default: [:]][saved.id] = saved
+                    saveCache()
+                    if stopAfterCreate.remove(write.docId) != nil {
+                        queue.append(PendingWrite(op: .delete, coll: write.coll, docId: saved.id, fields: [:]))
+                    }
+                }
             case .upsert:
                 let saved: RawDoc?
                 if let current {
                     saved = try await client.patch(write.coll, write.docId, fields: write.fields,
                                                    ifVersion: current.version)
+                } else if isTracked {
+                    // Gone from the server: there is nothing to change (tracked sailings are never made by PUT).
+                    return .sent
                 } else {
                     let data = write.fields.compactMapValues { value -> JSONValue? in value == .null ? nil : value }
                     saved = try await client.put(write.coll, write.docId, data: data, ifVersion: nil)
@@ -322,6 +595,7 @@ final class Store: ObservableObject {
             }
             return .sent
         } catch let error as APIError {
+            if isTracked, let outcome = trackedFailure(write, error) { return outcome }
             switch error {
             case .conflict, .notFound:
                 if write.op == .delete, case .notFound = error { return .sent }
@@ -342,17 +616,35 @@ final class Store: ObservableObject {
                 return .dropped("The server refused a change: \(why)")
             case .server(let why):
                 return .failed(why)
+            case .unsupported:
+                return .dropped("The deal server doesn't support that change yet.")
             }
         } catch {
             return .stop(.offline(error.localizedDescription))
         }
     }
 
-    private func enqueue(_ op: PendingWrite.Op, _ coll: String, _ id: String, _ fields: [String: JSONValue] = [:]) {
+    /// CONTRACT_V3 section 8: a tracked write never waits on an older server. A 404 on create, or a 405 on any of
+    /// them, drops it and the app goes back to v2 behaviour; a 409 on create means it is already tracked.
+    private func trackedFailure(_ write: PendingWrite, _ error: APIError) -> Outcome? {
+        switch (write.op, error) {
+        case (.create, .conflict):
+            return .sent
+        case (.create, .notFound), (_, .unsupported):
+            setLevel(.v2)
+            saveCache()
+            return .dropped("Tracking isn't on the deal server yet, so that change wasn't saved.")
+        default:
+            return nil
+        }
+    }
+
+    private func enqueue(_ op: PendingWrite.Op, _ coll: String, _ id: String, _ fields: [String: JSONValue] = [:],
+                         reason: RefreshReason? = nil) {
         queue.append(PendingWrite(op: op, coll: coll, docId: id, fields: fields))
         saveQueue()
         rebuild()
-        kick()
+        kick(reason: reason)
     }
 
     /// Records Jim's answer. Claude's fields belong to the brain (the server refuses them from the app); a changed
@@ -391,10 +683,30 @@ final class Store: ObservableObject {
         Haptics.tap()
     }
 
-    /// Saves My Trip. The buckets re-sort at once from the queued change; the brain reads it on its next run.
+    /// Saves My Trip. The buckets re-sort at once from the queued change; the brain reads it on its next run. The
+    /// v3 fields go only to a v3 server.
     func saveTrip(_ prefs: TripPrefs) {
-        enqueue(.upsert, "prefs", "trip", prefs.cleaned().fields())
+        enqueue(.upsert, "prefs", "trip", prefs.cleaned().fields(v3: isV3))
         Haptics.success()
+    }
+
+    /// My Lines on its own (from Settings): changes only `lines` on the trip settings that already exist.
+    func saveLines(_ lines: [String]) {
+        guard isV3, var prefs = trip else { return }
+        prefs.lines = lines
+        let clean = prefs.cleaned().effectiveLines
+        let value = JSONValue.array(clean.map { JSONValue.string($0) })
+        let stamp = JSONValue.string(Fmt.stamp())
+        if let index = queue.lastIndex(where: { $0.op == .upsert && $0.coll == "prefs" && $0.docId == "trip" }) {
+            queue[index].fields["lines"] = value
+            queue[index].fields["updatedAt"] = stamp
+            saveQueue()
+            rebuild()
+            kick()
+        } else if cache.colls["prefs"]?["trip"] != nil {
+            enqueue(.upsert, "prefs", "trip", ["lines": value, "updatedAt": stamp])
+        }
+        Haptics.tap()
     }
 
     /// Asks Deal Desk about a deal (or in general). The answerer on the server replies within a minute or two
@@ -474,15 +786,20 @@ final class Store: ObservableObject {
         cache = CacheFile()
         saveCache()
         UserDefaults.standard.removeObject(forKey: "push.lastToken")
+        UserDefaults.standard.removeObject(forKey: Store.nudgeKey)
         askedForPush = false
         problem = nil
+        level = .unknown
+        catalog = .builtIn
+        CatalogIndex.current = catalog
         rebuild()
-        kick()
+        kick(reason: .open)
     }
 
     func reloadEverything() {
         cache.serverTime = nil
-        kick()
+        cache.catalogAt = nil
+        kick(reason: .pull)
     }
 
     // MARK: - Internals
@@ -528,6 +845,10 @@ final class Store: ObservableObject {
                                        version: 0, updatedAt: nil)
                     colls[write.coll, default: [:]][write.docId] = fresh
                 }
+            case .create:
+                let fresh = RawDoc(id: write.docId, data: JSONValue.object([:]).merging(write.fields),
+                                   version: 0, updatedAt: nil)
+                colls[write.coll, default: [:]][write.docId] = fresh
             case .delete:
                 colls[write.coll]?[write.docId] = nil
             }
@@ -571,6 +892,11 @@ final class Store: ObservableObject {
             .sorted { ($0.asked, $0.id) < ($1.asked, $1.id) }
 
         trip = colls["prefs"]?["trip"].flatMap { $0.data.decode(TripPrefs.self) }
+
+        let localIds = Set(queue.filter { $0.op == .create }.map { $0.docId })
+        tracked = (colls["tracked"] ?? [:]).values
+            .compactMap { TrackedSailing(raw: $0, isLocal: localIds.contains($0.id)) }
+            .sorted(by: TrackedSailing.order)
 
         pendingKeys = Set(queue.map { "\($0.coll)/\($0.docId)" })
         updateBadge()

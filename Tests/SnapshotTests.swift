@@ -12,12 +12,20 @@ final class SnapshotTests: XCTestCase {
             throw XCTSkip("Set TEST_RUNNER_SNAPSHOT_DIR to write screenshots.")
         }
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        // The v2 store first: the last store made sets the catalog the screens read, and that should be v3's.
+        let older = Store(previewDocs: Samples.docs, level: .v2)
         let store = Store.preview()
         let empty = Store(previewDocs: [:])
         let router = Router()
         let callDeal = try XCTUnwrap(store.deal("sample-call"))
 
         let oasisBalcony = DealFilters(shipClasses: ["oasis", "icon"], cabinTypes: ["balcony"])
+        let celebrityLarge = DealFilters(lines: ["Celebrity"], sizes: ["large"])
+        var nextStar = TrackPick()
+        nextStar.ship = "Star of the Seas"
+        nextStar.sailDate = Fmt.day("2027-06-26")
+        nextStar.port = "Port Canaveral"
+        nextStar.cabinName = "Ocean View Balcony"
         func detail(_ id: String, _ focus: DetailFocus? = nil) -> AnyView {
             AnyView(NavigationStack { DealDetailView(dealId: id, focus: focus) })
         }
@@ -34,7 +42,7 @@ final class SnapshotTests: XCTestCase {
             ("09-detail-ask", detail("sample-fits", .ask), true, store),
             ("10-detail-v1-deal", detail("sample-call"), false, store),
             ("11-detail-sale", detail("sample-sale"), true, store),
-            ("12-my-trip", AnyView(TripEditor(start: Samples.trip)), true, store),
+            ("12-my-trip", AnyView(TripEditor(start: Samples.tripV3)), true, store),
             ("13-filters", AnyView(FilterSheet(filters: .constant(oasisBalcony), deals: store.inbox)), false, store),
             ("14-ask-deal-desk", AnyView(AskSheet()), true, store),
             ("15-answer-pass", AnyView(AnswerSheet(deal: callDeal, verdict: .pass, existing: nil)), false, store),
@@ -47,6 +55,20 @@ final class SnapshotTests: XCTestCase {
             ("22-empty-deals", AnyView(RootView()), true, empty),
             ("23-empty-for-my-trip", AnyView(DealsView(bucket: .trip)), false, empty),
             ("24-my-trip-not-set-up", AnyView(TripEditor(start: TripPrefs(), isNew: true)), false, empty),
+            // v3
+            ("25-tracking", AnyView(TrackingView()), true, store),
+            ("26-tracked-detail", AnyView(NavigationStack { TrackedDetailView(trackedId: "trk-sample-star") }), true, store),
+            ("27-tracked-filling", AnyView(NavigationStack { TrackedDetailView(trackedId: "trk-sample-beyond") }), false, store),
+            ("28-track-builder", AnyView(TrackBuilder(seed: TrackSeed(pick: nextStar, text: nil))), true, store),
+            ("29-track-from-link", AnyView(TrackBuilder(seed: TrackSeed(pick: nil, text: Samples.sharedLink))), false, store),
+            ("30-my-lines", AnyView(NavigationStack { LinesView(selection: .constant(["Royal Caribbean", "Celebrity"])) }),
+             true, store),
+            ("31-filters-lines-sizes", AnyView(FilterSheet(filters: .constant(celebrityLarge), deals: store.inbox,
+                                                           myLines: ["Royal Caribbean", "Celebrity"])), false, store),
+            ("32-detail-other-line", detail("sample-celebrity"), false, store),
+            ("33-tracking-empty", AnyView(TrackingView()), false, empty),
+            ("34-tracking-coming-soon", AnyView(TrackingView()), false, older),
+            ("35-my-trip-older-server", AnyView(TripEditor(start: Samples.trip)), false, older),
         ]
 
         for screen in screens {

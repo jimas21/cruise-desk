@@ -98,6 +98,11 @@ private struct DealDetailContent: View {
                         .opacity(heroGone ? 1 : 0)
                         .accessibilityHidden(!heroGone)
                 }
+                if store.isV3 && deal.kind != .sale && deal.sailDay != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        trackButton
+                    }
+                }
             }
             .safeAreaInset(edge: .bottom) { bottomBar }
             .sheet(item: $answering) { verdict in
@@ -116,6 +121,27 @@ private struct DealDetailContent: View {
                 router.askFocus = nil
                 scroll(proxy, to: .ask)
             }
+        }
+    }
+
+    /// Track this sailing (v3), or open it when it is already tracked.
+    @ViewBuilder
+    private var trackButton: some View {
+        if let tracked = store.trackedMatch(for: deal) {
+            Button {
+                router.openTracked(tracked.id)
+            } label: {
+                Image(systemName: "binoculars.fill")
+            }
+            .accessibilityLabel(Text("Tracking this sailing"))
+            .accessibilityHint(Text("Opens it in Tracking"))
+        } else {
+            Button {
+                router.trackSeed = TrackSeed(pick: TrackPick(deal: deal), text: nil)
+            } label: {
+                Image(systemName: "binoculars")
+            }
+            .accessibilityLabel(Text("Track this sailing"))
         }
     }
 
@@ -363,8 +389,14 @@ private struct DealDetailContent: View {
             if let flight = d.flight, !flight.isEmpty {
                 InfoRow(label: "Flight", value: flight)
             }
-            if let shipClass = deal.shipClass, shipClass != .other {
-                InfoRow(label: "Ship class", value: shipClass.short)
+            InfoRow(label: "Line", value: deal.line)
+            if let size = deal.sizeTier {
+                InfoRow(label: "Ship size", value: size.title, note: size.tonnage)
+            } else if let size = deal.sizeTitle {
+                InfoRow(label: "Ship size", value: size)
+            }
+            if let classTitle = deal.classTitle, deal.shipClass != .other {
+                InfoRow(label: "Ship class", value: classTitle)
             }
         }
     }
@@ -500,7 +532,7 @@ private struct DealDetailContent: View {
 }
 
 /// One cabin category: name and where it's from on the left, the price per person on the right.
-private struct CabinOptionRow: View {
+struct CabinOptionRow: View {
     let option: CabinOption
     let current: Bool
 
@@ -549,7 +581,7 @@ private struct CabinOptionRow: View {
 }
 
 /// "Day 2 · Mon Sep 6" / "Cozumel" / "8:00 AM – 5:00 PM".
-private struct ItineraryRow: View {
+struct ItineraryRow: View {
     let day: ItineraryDay
     let fallbackDay: Int
 
@@ -643,7 +675,7 @@ struct PriceHistoryChart: View {
 }
 
 /// A line through the values, scaled to fit, with the lowest point and the latest point as dots.
-private struct Sparkline: View {
+struct Sparkline: View {
     let values: [Int]
 
     var body: some View {
@@ -676,7 +708,7 @@ private struct Sparkline: View {
     }
 }
 
-private struct SourceRow: View {
+struct SourceRow: View {
     let source: DealSource
 
     var body: some View {
@@ -714,6 +746,11 @@ struct DealHero: View {
 
     private var d: DealData { deal.data }
 
+    /// "ROYAL CARIBBEAN · ICON CLASS"
+    private var heroEyebrow: String {
+        [deal.line, deal.kind == .sale ? nil : deal.classTitle].compactMap { $0 }.joined(separator: " · ")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
@@ -721,12 +758,11 @@ struct DealHero: View {
                     if let kind = deal.kind, kind == .drop || kind == .sale {
                         KindPill(kind: kind, onColor: true)
                     }
-                    if deal.kind != .sale, let shipClass = deal.shipClass {
-                        Text(shipClass.title.uppercased())
-                            .font(.system(.caption2, design: .rounded, weight: .bold))
-                            .tracking(0.6)
-                            .foregroundStyle(Color.white.opacity(0.85))
-                    }
+                    Text(heroEyebrow.uppercased())
+                        .font(.system(.caption2, design: .rounded, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(Color.white.opacity(0.85))
+                        .lineLimit(2)
                 }
                 Spacer(minLength: 8)
                 if let score = d.score {

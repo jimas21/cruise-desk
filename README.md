@@ -11,8 +11,17 @@ A native iPhone app for the cruise deal desk: the deals Claude finds, one glance
   deals, a deal that misses My Trip says why in one small line. Swipe right for Interested, left for Not for me or
   Later. Tap for the details: **The scoop** (Claude's plain-language write-up) first, then price, cabin options,
   the day-by-day itinerary, a price-history sparkline, perks and deadlines, sources, and an **Ask** thread.
-- **My Trip**: ship classes, length, cabin, who's going, budget, ports, regions, dates and alerts, in plain words.
-  The buckets re-sort on the phone the moment it is saved; Claude reads the same settings on its next check.
+- **Any cruise line**: every deal carries its line and a size tier (small, mid-size, large, mega, by tonnage), shown
+  above the ship's name. **My Lines** picks the lines Deal Desk watches (or every line), each with what it can
+  honestly see today: tracking live, limited data or news only.
+- **Tracking**: pick the exact sailing (line, ship, date, nights, cabin, and the exact category if you like) from
+  the sailings Deal Desk already knows, from a deal (the binoculars), or by pasting a sailing link (read on the
+  phone; nothing is fetched). Each one shows now vs typical vs the lowest seen with a price sparkline; fields read
+  "filling…" until the server fills them from its fare data. Swipe left to stop tracking.
+- **My Trip**: lines, ship sizes, Royal Caribbean classes, length, cabin, who's going, budget, ports, regions, dates
+  and sail months, what counts as a deal (new low, % under typical, price drop, sale, fits my trip; the lowest
+  score), alerts and how often to check, in plain words. The buckets re-sort on the phone the moment it is saved;
+  Claude reads the same settings on its next check.
 - **Ask Deal Desk**: ask about one deal (in its detail) or anything at all (the speech-bubble button on Deals).
   The deal server answers within a minute or two and an "Answer ready" alert opens the thread.
 - **Reviewed**: answered deals by answer, with Claude's reply.
@@ -21,10 +30,16 @@ A native iPhone app for the cruise deal desk: the deals Claude finds, one glance
   looks for.
 
 It reads and writes the `dealdesk-api` server described in the cruise-watch design notes (`prefs/trip` for My Trip,
-`questions` for Ask, `GET /v1/deals/{id}/history` for the sparkline): `GET /v1/sync` on launch
+`questions` for Ask, `GET /v1/deals/{id}/history` for the sparkline, and from v3 `GET /v1/catalog`, `tracked` and
+`POST /v1/refresh`): `GET /v1/sync` on launch
 and on pull to refresh, cached on the phone so it opens instantly and works offline (answers made offline are sent
 when the phone is back online), and versioned writes that re-sync and retry once when something changed at the same
-time. Alerts arrive as native push; a tap opens that deal. `dealdesk://deal/<id>` links do the same.
+time. Alerts arrive as native push; a tap opens that deal. `dealdesk://deal/<id>` links do the same,
+`dealdesk://tracked/<id>` opens a tracked sailing and `dealdesk://track?link=<page>` starts tracking from a page
+(a Shortcut can hand one over). On a v3 server, opening the app also asks for a light refresh of the sources that
+allow automated checks (at most every 5 minutes) and syncs again 90 seconds later. Until `GET /v1/catalog` says
+the server is v3, the app keeps its v2 behaviour: Tracking, My Lines and coverage say "coming soon", and no v3
+field or tracked write is ever sent.
 
 ## Building
 

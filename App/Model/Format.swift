@@ -95,6 +95,18 @@ enum Fmt {
     }
 
     private static let monthYear = formatter("MMM yyyy")
+
+    static let monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    /// 9 -> "Sep"
+    static func monthShort(_ month: Int) -> String {
+        (1...12).contains(month) ? monthNames[month - 1] : String(month)
+    }
+
+    /// The calendar month (1-12) of a day, in the phone's own time zone.
+    static func month(of date: Date) -> Int {
+        calendar.component(.month, from: date)
+    }
     private static let clockParser = formatter("HH:mm")
 
     /// "22:00" <-> a time of day, for quiet hours.
@@ -200,11 +212,12 @@ enum Speech {
     static func deal(_ deal: Deal, fails: [String] = []) -> String {
         var parts: [String] = []
         if deal.kind == .drop || deal.kind == .sale, let kind = deal.kind { parts.append(kind.title) }
-        if let shipClass = deal.shipClass, deal.kind != .sale {
-            parts.append("\(deal.title), \(shipClass.title)")
+        if let shipClass = deal.classTitle, deal.kind != .sale {
+            parts.append("\(deal.title), \(shipClass)")
         } else {
             parts.append(deal.title)
         }
+        parts.append(deal.eyebrow.replacingOccurrences(of: " · ", with: ", "))
         if deal.kind == .sale {
             for offer in (deal.data.offers ?? []).prefix(2) { parts.append("\(offer.label) \(offer.value)") }
             if let ends = deal.endsDay { parts.append("Ends \(Fmt.weekday(ends)), \(Fmt.countdown(ends))") }
@@ -234,6 +247,27 @@ enum Speech {
         }
         if let why = deal.data.why, !why.isEmpty { parts.append("Why: \(why)") }
         if !fails.isEmpty { parts.append("Not for your trip: \(fails.joined(separator: ", "))") }
+        return parts.joined(separator: ". ")
+    }
+
+    /// A tracked sailing's card, in the order the eye reads it; "filling" where a value isn't in yet.
+    static func tracked(_ item: TrackedSailing) -> String {
+        var parts: [String] = [item.eyebrow.replacingOccurrences(of: " · ", with: ", "), item.ship]
+        if !item.datesLine.isEmpty { parts.append(item.datesLine.replacingOccurrences(of: " · ", with: ", ")) }
+        if !item.pickLine.isEmpty { parts.append(item.pickLine.replacingOccurrences(of: " · ", with: ", ")) }
+        let d = item.data
+        if let now = d.pricePP {
+            parts.append("Now \(Fmt.usd(now)) per person" + (d.priceIncludesTaxes == true ? ", taxes in" : ""))
+        } else {
+            parts.append("Price \(item.missing())")
+        }
+        parts.append("Typical " + (d.typicalPP.map { Fmt.usd($0) } ?? item.missing(.typical)))
+        parts.append("Lowest seen " + (d.lowestSeenPP.map { Fmt.usd($0) } ?? item.missing()))
+        if let pct = d.pctUnderTypical {
+            parts.append(pct >= 0 ? "\(pct) percent under typical" : "\(-pct) percent over typical")
+        }
+        if let coverage = item.coverage { parts.append(coverage.title) }
+        if item.isLocal { parts.append("Waiting to send") }
         return parts.joined(separator: ". ")
     }
 

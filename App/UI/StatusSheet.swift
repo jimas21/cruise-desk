@@ -34,6 +34,10 @@ struct StatusSheet: View {
                         }
                     }
                 }
+                if store.isV3 {
+                    linesSection
+                    freshSection
+                }
                 if !store.watchlist.isEmpty {
                     Section("Watching · \(store.watchlist.count)") {
                         ForEach(store.watchlist) { item in
@@ -80,6 +84,50 @@ struct StatusSheet: View {
             }
         }
         .presentationDragIndicator(.visible)
+        .task { await store.loadRefreshState() }
+    }
+
+    /// What Deal Desk can see on each of My Lines (from the deal server's catalog).
+    private var linesSection: some View {
+        let mine = store.trip?.effectiveLines ?? [CruiseLine.royal]
+        let names = mine.isEmpty ? CruiseLine.choosable(store.catalog) : mine
+        return Section {
+            ForEach(names, id: \.self) { name in
+                LineRow(name: name, line: store.catalog.line(name))
+            }
+        } header: {
+            Text(mine.isEmpty ? "Every line" : "My lines")
+        }
+    }
+
+    /// The last "fresh look" this phone asked for, and how far the collector got with it.
+    @ViewBuilder
+    private var freshSection: some View {
+        let state = store.refreshState
+        if store.nudgedAt != nil || state?.requestedAt != nil {
+            Section {
+                if let asked = store.nudgedAt {
+                    InfoRow(label: "Asked", value: Fmt.when(asked),
+                            note: store.nudge?.accepted == false ? "the server had just checked" : nil)
+                }
+                if let next = Fmt.timestamp(store.nudge?.nextAllowedAt), next > Date() {
+                    InfoRow(label: "Next allowed", value: Fmt.when(next))
+                }
+                if let seen = Fmt.timestamp(state?.collectorSeenAt) {
+                    InfoRow(label: "Collector started", value: Fmt.when(seen))
+                }
+                if let done = Fmt.timestamp(state?.collectorDoneAt) {
+                    InfoRow(label: "Collector done", value: Fmt.when(done))
+                }
+                if let refilled = Fmt.timestamp(state?.refilledAt) {
+                    InfoRow(label: "Tracked prices filled", value: Fmt.when(refilled))
+                }
+            } header: {
+                Text("Fresh look")
+            } footer: {
+                Text("Only the sources that allow automated checks are refreshed; others reach Deal Desk through their own alert emails.")
+            }
+        }
     }
 
     @ViewBuilder
@@ -121,6 +169,9 @@ private struct WatchRow: View {
         let d = item.data
         VStack(alignment: .leading, spacing: 3) {
             Text(d.ship ?? "Sailing").font(.subheadline.weight(.semibold))
+            if let line = d.line, !CruiseLine.isRoyal(line) {
+                Text(line).font(.caption).foregroundStyle(.secondary)
+            }
             Text(line)
                 .font(.footnote)
                 .foregroundStyle(.secondary)

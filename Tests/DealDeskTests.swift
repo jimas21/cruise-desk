@@ -435,18 +435,18 @@ final class TripCheckTests: XCTestCase {
         var filters = DealFilters()
         XCTAssertFalse(filters.isActive)
         filters.shipClasses = ["oasis"]
-        XCTAssertEqual(Samples.deals.filter(filters.matches).map { $0.id }, ["sample-call", "sample-drop"])
+        XCTAssertEqual(Samples.deals.filter { filters.matches($0) }.map { $0.id }, ["sample-call", "sample-drop"])
         XCTAssertEqual(filters.summary, "Oasis")
         filters = DealFilters()
         filters.months = ["2027-09"]
-        XCTAssertEqual(Samples.deals.filter(filters.matches).map { $0.id }, ["sample-fits"])
+        XCTAssertEqual(Samples.deals.filter { filters.matches($0) }.map { $0.id }, ["sample-fits"])
         filters = DealFilters()
         filters.maxTotal = 2000
-        XCTAssertEqual(Samples.deals.filter(filters.matches).map { $0.id }, ["sample-call"])
+        XCTAssertEqual(Samples.deals.filter { filters.matches($0) }.map { $0.id }, ["sample-call"])
         filters = DealFilters()
         filters.places = ["Galveston"]
         filters.nightsMin = 7
-        XCTAssertEqual(Samples.deals.filter(filters.matches).map { $0.id }, ["sample-drop"])
+        XCTAssertEqual(Samples.deals.filter { filters.matches($0) }.map { $0.id }, ["sample-drop"])
         XCTAssertEqual(filters.activeCount, 2)
         XCTAssertEqual(DealFilters.decode(filters.encoded()), filters)
         XCTAssertEqual(DealFilters.decode("not json"), DealFilters())
@@ -458,8 +458,8 @@ final class StoreV2Tests: XCTestCase {
     func testBucketsFollowMyTripLive() throws {
         let store = Store.preview()
         XCTAssertEqual(store.bucket(.trip, filters: DealFilters(), sort: .score).map { $0.id },
-                       ["sample-fits", "sample-quantum"])
-        XCTAssertEqual(store.bucket(.best, filters: DealFilters(), sort: .score).count, 4, "answered deals leave the inbox")
+                       ["sample-fits", "sample-quantum", "sample-celebrity"], "My Lines takes Celebrity too")
+        XCTAssertEqual(store.bucket(.best, filters: DealFilters(), sort: .score).count, 5, "answered deals leave the inbox")
         var relaxed = try XCTUnwrap(store.trip)
         relaxed.nightsMin = 4
         store.saveTrip(relaxed)

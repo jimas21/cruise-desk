@@ -19,7 +19,7 @@ struct DealDeskApp: App {
     }
 }
 
-/// Four tabs: Deals (the inbox), Reviewed, Save, Rules.
+/// Five tabs: Deals (the inbox), Tracking, Reviewed, Save, Rules.
 struct RootView: View {
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var router: Router
@@ -31,6 +31,9 @@ struct RootView: View {
                 .tabItem { Label("Deals", systemImage: "ferry") }
                 .badge(store.unansweredCount)
                 .tag(AppTab.deals)
+            TrackingView()
+                .tabItem { Label("Tracking", systemImage: "binoculars") }
+                .tag(AppTab.tracking)
             ReviewedView()
                 .tabItem { Label("Reviewed", systemImage: "checkmark.circle") }
                 .tag(AppTab.reviewed)
@@ -42,10 +45,17 @@ struct RootView: View {
                 .tag(AppTab.rules)
         }
         .task {
-            await store.refresh()
+            await store.refresh(reason: .open)
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { store.foregrounded() }
+            switch phase {
+            case .active: store.foregrounded()
+            case .background: store.backgrounded()
+            default: break
+            }
+        }
+        .sheet(item: $router.trackSeed) { seed in
+            TrackBuilder(seed: seed)
         }
         .alert("Heads up", isPresented: noticeShown) {
             Button("OK", role: .cancel) { store.notice = nil }
