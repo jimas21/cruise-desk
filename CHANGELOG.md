@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/jimas21/cruise-desk/compare/v1.2.0...v1.2.1) (2026-11-27)
+
+
+### Fixes
+
+* My Trip cannot save its starting values over the server's trip rules ([e39ae56](https://github.com/jimas21/cruise-desk/commit/e39ae5647dcf301faad42ca2f7d8130202742d90))
+
 ## [1.2.0](https://github.com/jimas21/cruise-desk/compare/v1.1.0...v1.2.0) (2026-11-27)
 
 
