@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0](https://github.com/jimas21/cruise-desk/compare/v1.1.0...v1.2.0) (2026-11-27)
+
+
+### Features
+
+* Deal Desk v2: two buckets, My Trip, the summary sheet, the scoop and Ask ([850f2d0](https://github.com/jimas21/cruise-desk/commit/850f2d09a14cfa33e1716f1744e59198d0d77fd7))
+
+
+### Fixes
+
+* card dates wrap as dates then nights, never with a dangling dot ([373e71e](https://github.com/jimas21/cruise-desk/commit/373e71ef860b7ac21316a7eff3961f01d10b7489))
+* summary sheet dates sit beside the score ring; the ship class wraps whole ([bad1baa](https://github.com/jimas21/cruise-desk/commit/bad1baad30ae6983e1cf0d615ec0d111cccf524a))
+
 ## [1.1.0](https://github.com/jimas21/cruise-desk/compare/v1.0.0...v1.1.0) (2026-11-27)
 
 
