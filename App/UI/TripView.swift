@@ -5,6 +5,10 @@ import SwiftUI
 /// Claude uses the same settings on its next check.
 struct TripEditor: View {
     let isNew: Bool
+    /// What the screen opened with, so a phone with no `prefs/trip` yet cannot save the generic starting values
+    /// untouched over the trip rules the brain is using.
+    private let start: TripPrefs
+    private let startAges: [Int?]
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
     @State private var draft: TripPrefs
@@ -16,12 +20,18 @@ struct TripEditor: View {
 
     init(start: TripPrefs, isNew: Bool = false) {
         self.isNew = isNew
+        self.start = start
         _draft = State(initialValue: start)
         let known = start.childAges ?? []
-        _ages = State(initialValue: (0..<max(start.children, 0)).map { index -> Int? in
+        let firstAges = (0..<max(start.children, 0)).map { index -> Int? in
             index < known.count ? known[index] : nil
-        })
+        }
+        startAges = firstAges
+        _ages = State(initialValue: firstAges)
     }
+
+    /// Not set up yet and nothing changed: Save stays off, so the starting values never replace the real rules.
+    private var untouchedStart: Bool { isNew && draft == start && ages == startAges }
 
     /// Homeports the line sails from (public, not anyone's trip); the deals' own ports are added to these.
     private static let commonPorts = ["Seattle", "Vancouver", "Los Angeles", "San Diego", "Galveston", "New Orleans",
@@ -83,7 +93,7 @@ struct TripEditor: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { save() }
                         .fontWeight(.semibold)
-                        .disabled(draft.shipClasses.isEmpty || draft.cabinTypes.isEmpty)
+                        .disabled(draft.shipClasses.isEmpty || draft.cabinTypes.isEmpty || untouchedStart)
                 }
             }
         }
@@ -114,7 +124,7 @@ struct TripEditor: View {
             .accessibilityElement(children: .combine)
         } footer: {
             if isNew {
-                Text("Claude is still using the trip rules it started with. Saving here takes over: these become the rules for For my trip and for Claude's next check.")
+                Text("Not set up yet. For my trip and Claude still use the trip rules on the server; the values below are only a starting point, not your trip. Save turns on once you change something, and then everything on this screen replaces those rules.")
             } else {
                 Text("For my trip re-sorts as soon as you save. Claude uses the same settings on its next check.")
             }
