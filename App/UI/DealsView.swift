@@ -197,7 +197,7 @@ struct DealsHeader: View {
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 0) {
-                Spacer(minLength: typeSize.isAccessibilitySize ? 64 : 96)
+                Spacer(minLength: typeSize.isAccessibilitySize ? 112 : 96)
                 CheckLine(status: status, syncing: syncing)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)

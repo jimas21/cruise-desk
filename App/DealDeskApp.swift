@@ -1,15 +1,10 @@
 import SwiftUI
-import UIKit
 
 @main
 struct DealDeskApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store = Store.shared
     @StateObject private var router = Router.shared
-
-    init() {
-        TitleStyle.apply()
-    }
 
     var body: some Scene {
         WindowGroup {

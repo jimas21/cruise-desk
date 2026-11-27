@@ -72,21 +72,6 @@ extension Deal {
     var isExceptional: Bool { data.scoreLabel == "Exceptional" }
 }
 
-/// Navigation titles in SF Pro Rounded, matching the money and the hero names. Sizes follow Dynamic Type.
-enum TitleStyle {
-    static func apply() {
-        let bar = UINavigationBar.appearance()
-        bar.largeTitleTextAttributes = [.font: rounded(.largeTitle, size: 34, weight: .bold)]
-        bar.titleTextAttributes = [.font: rounded(.headline, size: 17, weight: .semibold)]
-    }
-
-    private static func rounded(_ style: UIFont.TextStyle, size: CGFloat, weight: UIFont.Weight) -> UIFont {
-        let base = UIFont.systemFont(ofSize: size, weight: weight)
-        let font = base.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: size) } ?? base
-        return UIFontMetrics(forTextStyle: style).scaledFont(for: font)
-    }
-}
-
 /// [✓ FITS] [? YOUR CALL] [↘ PRICE DROP] [SALE]: the only place kind colours appear on a list.
 /// `onColor` is the white version used on the detail hero.
 struct KindPill: View {

@@ -246,15 +246,15 @@ struct HeroBackdrop: View {
                 Canvas { context, size in
                     let w = size.width, h = size.height
                     // A pale far swell, then two deeper ones, so the water darkens toward the bottom (white text
-                    // keeps its contrast) with thin light crests.
-                    let far = Swell(baseline: h * 0.72, amplitude: 4, wavelength: w * 0.6, speed: 0.4, offset: 0.5)
-                    let mid = Swell(baseline: h * 0.82, amplitude: 5, wavelength: w * 0.75, speed: -0.5, offset: 2.1)
-                    let near = Swell(baseline: h * 0.91, amplitude: 5, wavelength: w * 0.9, speed: 0.6, offset: 3.7)
-                    context.fill(far.body(width: w, bottom: h, time: time), with: .color(Color.white.opacity(0.07)))
+                    // keeps its contrast). Only the lowest swell, below the text, has a light crest line.
+                    let far = Swell(baseline: h * 0.70, amplitude: 4, wavelength: w * 0.6, speed: 0.4, offset: 0.5)
+                    let mid = Swell(baseline: h * 0.83, amplitude: 5, wavelength: w * 0.75, speed: -0.5, offset: 2.1)
+                    let near = Swell(baseline: max(h - 14, h * 0.9), amplitude: 4, wavelength: w * 0.9, speed: 0.6,
+                                     offset: 3.7)
+                    context.fill(far.body(width: w, bottom: h, time: time), with: .color(Color.white.opacity(0.06)))
                     context.fill(mid.body(width: w, bottom: h, time: time), with: .color(Color.black.opacity(0.08)))
-                    context.stroke(mid.crest(width: w, time: time), with: .color(Color.white.opacity(0.16)), lineWidth: 1)
                     context.fill(near.body(width: w, bottom: h, time: time), with: .color(Color.black.opacity(0.12)))
-                    context.stroke(near.crest(width: w, time: time), with: .color(Color.white.opacity(0.14)), lineWidth: 1)
+                    context.stroke(near.crest(width: w, time: time), with: .color(Color.white.opacity(0.18)), lineWidth: 1)
                 }
             }
         }

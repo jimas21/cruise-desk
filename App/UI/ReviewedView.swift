@@ -18,10 +18,14 @@ struct ReviewedView: View {
                     if !items.isEmpty {
                         Section {
                             // The group's name as a plain row, so it scrolls with its cards instead of pinning.
-                            Label("\(verdict.groupTitle) · \(items.count)", systemImage: verdict.symbol)
+                            HStack(spacing: 6) {
+                                Image(systemName: verdict.symbol)
+                                Text("\(verdict.groupTitle) · \(items.count)")
+                            }
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Palette.verdict(verdict))
                                 .monospacedDigit()
+                                .accessibilityElement(children: .combine)
                                 .accessibilityAddTraits(.isHeader)
                                 .listRowInsets(EdgeInsets(top: 16, leading: CardList.gutter + 4, bottom: 2,
                                                           trailing: CardList.gutter))
