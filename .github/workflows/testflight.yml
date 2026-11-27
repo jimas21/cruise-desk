@@ -1,19 +1,15 @@
 name: TestFlight
-run-name: Deal Desk ${{ inputs.ref }}
+run-name: Deal Desk ${{ github.ref_name }}
 
 # Builds the app and uploads it to TestFlight with this repository's own App Store Connect key, so nothing here
-# depends on any other project. Settings > Secrets and variables > Actions:
+# depends on any other project. The Release workflow starts it on each new vX.Y.Z tag (gh workflow run --ref vX.Y.Z);
+# it can also be started by hand from the Actions tab: pick the latest vX.Y.Z tag to rebuild a release, or main for
+# a labelled manual build. Settings > Secrets and variables > Actions:
 #   variable TEAM_ID
 #   secrets  ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8   (an App Store Connect API key made for Deal Desk)
 #   secrets  DEALDESK_BUNDLE_ID, DEALDESK_BASE_URL, DEALDESK_APP_TOKEN
 on:
   workflow_dispatch:
-    inputs:
-      ref:
-        description: cruise-desk branch, tag or commit to build
-        required: true
-        default: main
-        type: string
 
 permissions:
   contents: read
@@ -36,7 +32,6 @@ jobs:
       - name: Check out Deal Desk
         uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       - name: Preflight (settings present and well-formed)
@@ -47,6 +42,22 @@ jobs:
           DD_BASE_URL: ${{ secrets.DEALDESK_BASE_URL }}
           DD_APP_TOKEN: ${{ secrets.DEALDESK_APP_TOKEN }}
         run: bash ci/preflight.sh
+
+      # A build from a vX.Y.Z tag must carry exactly that version (release-please writes it into project.yml in the
+      # release commit the tag points at). Any other ref is a manual build and is labelled as one.
+      - name: Check the version against the tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" = "tag" ]; then
+            printf '%s' "$REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::Tag $REF_NAME is not a release tag (vX.Y.Z)."; exit 1; }
+            [ "${REF_NAME#v}" = "$MARKETING_VERSION" ] || { echo "::error::Tag $REF_NAME but project.yml says $MARKETING_VERSION. Never edit MARKETING_VERSION by hand; re-run from the latest release tag."; exit 1; }
+            echo "BUILD_KIND=release $REF_NAME" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Manual build of $REF_NAME ($MARKETING_VERSION), not a release. Rebuild a release from its vX.Y.Z tag."
+            echo "BUILD_KIND=manual build of $REF_NAME" >> "$GITHUB_ENV"
+          fi
 
       - name: Write API key to a temp file
         env:
@@ -99,7 +110,7 @@ jobs:
           {
             echo "### Deal Desk uploaded to TestFlight"
             echo ""
-            echo "- Version: \`${MARKETING_VERSION} (${BUILD_NUMBER})\`"
+            echo "- Version: \`${MARKETING_VERSION} (${BUILD_NUMBER})\` (${BUILD_KIND})"
             echo "- cruise-desk: \`$(git rev-parse --short HEAD)\`"
           } >> "$GITHUB_STEP_SUMMARY"
 

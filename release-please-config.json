@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+  "bootstrap-sha": "421a084b712d0cbfd323bb8d362ef5cc9355701b",
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Fixes" },
+    { "type": "perf", "section": "Performance" }
+  ],
+  "packages": {
+    ".": {
+      "extra-files": [
+        { "type": "generic", "path": "project.yml" }
+      ]
+    }
+  }
+}

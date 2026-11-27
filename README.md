@@ -23,11 +23,11 @@ No Mac is involved. Everything runs on GitHub Actions; the Xcode project is gene
 | Workflow | Where | What it does |
 | --- | --- | --- |
 | `Compile check` | here | Unsigned simulator build on every push, then the unit tests (`Tests/`) on an iPhone simulator. It also renders every screen from sample data, light and dark, and uploads them as the run's `screenshots` artifact. No secrets. |
-| `Deal Desk TestFlight` | the team's signing repository (copy of `ci/rogue-pocket/dealdesk-testflight.yml`) | Preflight, registers the bundle ID and turns on Push Notifications for it (`ci/asc_setup.py`), checks the App Store Connect app record, picks the build number, draws the icon (`ci/make_icon.py`), archives with the server address and app token from secrets, and uploads to TestFlight. |
+| `TestFlight` | here | Started by the Release workflow on each new `vX.Y.Z` tag (or by hand). Preflight, checks the version matches the tag, registers the bundle ID and turns on Push Notifications for it (`ci/asc_setup.py`), checks the App Store Connect app record, picks the build number, draws the icon (`ci/make_icon.py`), archives with the server address and app token from secrets, and uploads to TestFlight. |
+| `Release` | here | release-please on every push to main: a `feat`, `fix` or `perf` commit becomes a release (tag, GitHub release, `CHANGELOG.md`) and starts TestFlight. See `RELEASING.md`. |
 
 Settings the TestFlight workflow needs (names only; values live in GitHub secrets): variable `TEAM_ID`, secrets
-`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`, `DEALDESK_BUNDLE_ID`, `DEALDESK_BASE_URL`, `DEALDESK_APP_TOKEN`, and
-`DEALDESK_DEPLOY_KEY` (a read-only deploy key for this repository, only while it is private).
+`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`, `DEALDESK_BUNDLE_ID`, `DEALDESK_BASE_URL`, `DEALDESK_APP_TOKEN`.
 
 One-time steps only the account holder can do:
 
