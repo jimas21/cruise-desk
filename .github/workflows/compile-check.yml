@@ -60,6 +60,9 @@ jobs:
           echo "BUILD SUCCEEDED ($(grep -cE '^SwiftCompile ' build.log || true) Swift compile steps)"
 
       - name: Unit tests (simulator)
+        env:
+          # SnapshotTests renders every screen (sample data, light and dark) into this folder.
+          TEST_RUNNER_SNAPSHOT_DIR: ${{ github.workspace }}/snapshots
         run: |
           udid="$(xcrun simctl list devices available -j | python3 ci/pick_simulator.py)"
           status=0
@@ -71,3 +74,13 @@ jobs:
             echo "::error::Tests failed"
             exit 1
           fi
+          ls snapshots 2>/dev/null | sed 's/^/screenshot: /' || true
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: snapshots/
+          if-no-files-found: warn
+          retention-days: 14
