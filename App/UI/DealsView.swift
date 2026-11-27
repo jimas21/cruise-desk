@@ -56,7 +56,7 @@ struct DealsView: View {
         case .newest:
             return matching
         case .score:
-            return matching.sorted { ($0.data.score ?? 0, $0.posted) > ($1.data.score ?? 0, $1.posted) }
+            return matching.sorted { ($0.data.score ?? 0, $0.latest) > ($1.data.score ?? 0, $1.latest) }
         }
     }
 
@@ -172,16 +172,7 @@ struct DealsView: View {
             .sheet(item: $answering) { target in
                 AnswerSheet(deal: target.deal, verdict: target.verdict, existing: nil)
             }
-            .alert("Heads up", isPresented: noticeShown) {
-                Button("OK", role: .cancel) { store.notice = nil }
-            } message: {
-                Text(store.notice ?? "")
-            }
         }
-    }
-
-    private var noticeShown: Binding<Bool> {
-        Binding(get: { store.notice != nil }, set: { if !$0 { store.notice = nil } })
     }
 }
 

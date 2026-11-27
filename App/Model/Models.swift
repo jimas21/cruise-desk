@@ -127,6 +127,8 @@ struct Deal: Identifiable, Hashable {
     var kind: DealKind? { data.kind.flatMap { DealKind(rawValue: $0) } }
     var title: String { (data.ship?.isEmpty == false ? data.ship : nil) ?? "Deal" }
     var posted: Date { Fmt.timestamp(data.postedAt) ?? .distantPast }
+    /// Latest of first posted and last material change (price etc.); "Newest" sorts by this.
+    var latest: Date { max(posted, Fmt.timestamp(data.changedAt) ?? .distantPast) }
     var sailDay: Date? { Fmt.day(data.sailDate) }
     var bookByDay: Date? { Fmt.day(data.bookBy) }
     var endsDay: Date? { Fmt.day(data.endsAt) }

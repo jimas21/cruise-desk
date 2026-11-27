@@ -1,6 +1,7 @@
 name: Compile check
 
-# Compiles the app for the iOS Simulator, unsigned, on every push, so Swift mistakes show up in minutes.
+# Compiles the app for the iOS Simulator, unsigned, on every push, then runs the unit tests on a simulator,
+# so Swift mistakes and logic slips show up in minutes.
 # No secrets: the server address and token stay the placeholders from project.yml.
 on:
   push:
@@ -18,7 +19,7 @@ concurrency:
 jobs:
   compile:
     runs-on: macos-26
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HOMEBREW_NO_INSTALL_CLEANUP: "1"
@@ -56,4 +57,17 @@ jobs:
             echo "::error::Build failed"
             exit 1
           fi
-          echo "BUILD SUCCEEDED"
+          echo "BUILD SUCCEEDED ($(grep -cE '^SwiftCompile ' build.log || true) Swift compile steps)"
+
+      - name: Unit tests (simulator)
+        run: |
+          udid="$(xcrun simctl list devices available -j | python3 ci/pick_simulator.py)"
+          status=0
+          xcodebuild test -project DealDesk.xcodeproj -scheme DealDesk -destination "id=$udid" CODE_SIGNING_ALLOWED=NO > test.log 2>&1 || status=$?
+          grep -E "Test Case .*(passed|failed)|Executed [0-9]+ test|: error:|TEST (SUCCEEDED|FAILED)" test.log | head -n 200 || true
+          if [ "$status" -ne 0 ] || ! grep -q 'TEST SUCCEEDED' test.log; then
+            echo "--- last lines ---"
+            tail -n 60 test.log
+            echo "::error::Tests failed"
+            exit 1
+          fi

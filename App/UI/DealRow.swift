@@ -52,13 +52,16 @@ struct DealRow: View {
 /// Trip, cabin, money and why: one line each.
 private struct SailingLines: View {
     let deal: Deal
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var lines: Int { typeSize.isAccessibilitySize ? 3 : 1 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             if !deal.tripLine.isEmpty {
                 Text(deal.tripLine)
                     .font(.subheadline)
-                    .lineLimit(1)
+                    .lineLimit(lines)
                     .minimumScaleFactor(0.85)
             }
             CabinLine(deal: deal)
@@ -67,7 +70,7 @@ private struct SailingLines: View {
                 Text(why)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(lines)
             }
         }
     }
@@ -76,6 +79,7 @@ private struct SailingLines: View {
 /// "Balcony · ✓ ocean view" or "Balcony · type not confirmed".
 struct CabinLine: View {
     let deal: Deal
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         if let cabin = deal.cabinTitle {
@@ -94,7 +98,7 @@ struct CabinLine: View {
                 }
             }
             .font(.subheadline)
-            .lineLimit(1)
+            .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
         }
     }
 }

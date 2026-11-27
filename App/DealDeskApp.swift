@@ -47,6 +47,15 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { store.foregrounded() }
         }
+        .alert("Heads up", isPresented: noticeShown) {
+            Button("OK", role: .cancel) { store.notice = nil }
+        } message: {
+            Text(store.notice ?? "")
+        }
+    }
+
+    private var noticeShown: Binding<Bool> {
+        Binding(get: { store.notice != nil }, set: { if !$0 { store.notice = nil } })
     }
 }
 

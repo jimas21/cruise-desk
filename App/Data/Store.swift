@@ -477,7 +477,7 @@ final class Store: ObservableObject {
 
         let dealList = (colls["deals"] ?? [:]).values
             .compactMap { Deal(raw: $0) }
-            .sorted { $0.posted > $1.posted }
+            .sorted { $0.latest > $1.latest }
         deals = dealList
         dealIndex = Dictionary(dealList.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 

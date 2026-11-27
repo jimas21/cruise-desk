@@ -34,3 +34,30 @@ targets:
         ENABLE_PREVIEWS: "YES"
         DD_BASE_URL: "https://REPLACE.invalid"           # placeholder; the app shows "Not set up" until set
         DD_APP_TOKEN: "REPLACE_APP_TOKEN"                # placeholder
+  DealDeskTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: DealDesk
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.REPLACE.dealdesk.tests
+        GENERATE_INFOPLIST_FILE: "YES"
+        SWIFT_VERSION: "5.0"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/DealDesk.app/DealDesk"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+schemes:
+  DealDesk:
+    build:
+      targets:
+        DealDesk: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - DealDeskTests
+    archive:
+      config: Release
