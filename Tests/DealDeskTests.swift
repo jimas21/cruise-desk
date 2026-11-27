@@ -134,6 +134,11 @@ final class JSONValueTests: XCTestCase {
         let body = Data(#"{"detail": [{"loc": ["body", "data", "why"], "msg": "at most 90 characters"}]}"#.utf8)
         XCTAssertEqual(APIClient.describe(body), "why: at most 90 characters")
         XCTAssertEqual(APIClient.describe(Data(#"{"detail": "not allowed"}"#.utf8)), "not allowed")
+        // dealdesk-api's own shapes
+        let api = Data(#"{"error": "validation failed", "errors": [{"field": "why", "msg": "at most 90 characters"}]}"#.utf8)
+        XCTAssertEqual(APIClient.describe(api), "why: at most 90 characters")
+        XCTAssertEqual(APIClient.describe(Data(#"{"error": "the app may only change a rule's status"}"#.utf8)),
+                       "the app may only change a rule's status")
     }
 }
 
@@ -151,13 +156,23 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(store.reviewed(.pass).map { $0.id }, ["sample-fits"])
     }
 
-    func testChangingAnAnswerClearsClaudesOldReply() throws {
+    func testChangingAnAnswerHidesTheOldReplyWithoutTouchingClaudesFields() throws {
         let store = Store.preview()
         XCTAssertNotNil(store.feedback["sample-drop"]?.reply)
         let deal = try XCTUnwrap(store.deal("sample-drop"))
         store.answer(deal, verdict: .later, reasons: [], note: "")
         XCTAssertEqual(store.feedback["sample-drop"]?.verdict, .later)
-        XCTAssertNil(store.feedback["sample-drop"]?.reply)
+        XCTAssertNil(store.feedback["sample-drop"]?.reply, "the old reply answered the old answer")
+        XCTAssertNotNil(store.feedback["sample-drop"]?.data.claudeReply, "the app never writes Claude's fields")
+    }
+
+    func testReplyShowsOnceClaudeHasReadTheAnswer() throws {
+        let raw = RawDoc(id: "d", data: .object([
+            "dealId": .string("d"), "verdict": .string("pass"), "reasons": .array([]),
+            "updatedAt": .string("2026-11-27T10:00:00Z"), "claudeReadAt": .string("2026-11-27T11:00:00Z"),
+            "claudeReply": .string("Noted."),
+        ]), version: 2, updatedAt: nil)
+        XCTAssertEqual(Feedback(raw: raw)?.reply, "Noted.")
     }
 
     func testRuleLifecycle() throws {

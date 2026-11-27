@@ -261,7 +261,14 @@ struct Feedback: Identifiable, Hashable {
 
     var verdict: Verdict? { data.verdict.flatMap { Verdict(rawValue: $0) } }
     var updated: Date { Fmt.timestamp(data.updatedAt) ?? .distantPast }
-    var reply: String? { (data.claudeReply?.isEmpty == false) ? data.claudeReply : nil }
+    /// Claude's reply, shown only while it answers the current answer (Claude read it after the last change).
+    var reply: String? {
+        guard let text = data.claudeReply, !text.isEmpty else { return nil }
+        if let read = Fmt.timestamp(data.claudeReadAt), let changed = Fmt.timestamp(data.updatedAt), read < changed {
+            return nil
+        }
+        return text
+    }
 }
 
 // MARK: - Rules

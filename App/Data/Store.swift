@@ -320,7 +320,8 @@ final class Store: ObservableObject {
         kick()
     }
 
-    /// Records Jim's answer. Changing an answer clears Claude's old reply so it reads the new one.
+    /// Records Jim's answer. Claude's fields belong to the brain (the server refuses them from the app); a changed
+    /// answer is newer than `claudeReadAt`, so the old reply is hidden until Claude reads the new one.
     func answer(_ deal: Deal, verdict: Verdict, reasons: [String], note: String) {
         enqueue(.upsert, "feedback", deal.id, [
             "dealId": .string(deal.id),
@@ -328,8 +329,6 @@ final class Store: ObservableObject {
             "reasons": .array(reasons.map { JSONValue.string($0) }),
             "note": .string(note.capped(500)),
             "updatedAt": .string(Fmt.stamp()),
-            "claudeReadAt": .null,
-            "claudeReply": .null,
         ])
         Haptics.success()
     }

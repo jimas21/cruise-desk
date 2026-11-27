@@ -159,7 +159,8 @@ enum Samples {
         for deal in deals { put("deals", deal.id, JSONValue(encoding: deal.data)) }
         put("feedback", "sample-drop", .object([
             "dealId": .string("sample-drop"), "verdict": .string("interested"), "reasons": .array([.string("watch")]),
-            "note": .string(""), "updatedAt": .string(Fmt.stamp()),
+            "note": .string(""), "updatedAt": .string(Fmt.stamp(Date().addingTimeInterval(-7200))),
+            "claudeReadAt": .string(Fmt.stamp(Date().addingTimeInterval(-3600))),
             "claudeReply": .string("Watching it. I'll ping you if it goes under $1,200 pp."),
         ]))
         put("plays", "sample-live", JSONValue(encoding: livePlay))

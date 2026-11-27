@@ -4,12 +4,12 @@ enum APIError: Error {
     case notConfigured
     /// No connection, or the server is not answering. Writes stay queued.
     case offline(String)
-    /// 401/403: the app token was not accepted.
+    /// 401: the app token was not accepted.
     case unauthorized
     case notFound
     /// 409: someone else changed the document first.
     case conflict
-    /// 413/422: the server refused the content; retrying cannot help.
+    /// 403/413/422: the server refused this request (role rule, size, schema); retrying cannot help.
     case rejected(String)
     case server(String)
 }
@@ -122,8 +122,10 @@ struct APIClient {
         switch http.statusCode {
         case 200..<300:
             return data
-        case 401, 403:
+        case 401:
             throw APIError.unauthorized
+        case 403:
+            throw APIError.rejected(APIClient.describe(data))
         case 404:
             throw APIError.notFound
         case 409:
