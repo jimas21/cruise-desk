@@ -22,7 +22,7 @@ No Mac is involved. Everything runs on GitHub Actions; the Xcode project is gene
 
 | Workflow | Where | What it does |
 | --- | --- | --- |
-| `Compile check` | here | Unsigned simulator build on every push. No secrets. |
+| `Compile check` | here | Unsigned simulator build on every push, then the unit tests (`Tests/`) on an iPhone simulator. It also renders every screen from sample data, light and dark, and uploads them as the run's `screenshots` artifact. No secrets. |
 | `Deal Desk TestFlight` | the team's signing repository (copy of `ci/rogue-pocket/dealdesk-testflight.yml`) | Preflight, registers the bundle ID and turns on Push Notifications for it (`ci/asc_setup.py`), checks the App Store Connect app record, picks the build number, draws the icon (`ci/make_icon.py`), archives with the server address and app token from secrets, and uploads to TestFlight. |
 
 Settings the TestFlight workflow needs (names only; values live in GitHub secrets): variable `TEAM_ID`, secrets

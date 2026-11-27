@@ -180,6 +180,9 @@ struct DealsView: View {
 struct CheckLine: View {
     let status: RunStatus?
     let syncing: Bool
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var lines: Int { typeSize.isAccessibilitySize ? 3 : 1 }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -191,11 +194,11 @@ struct CheckLine: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(Palette.call)
                     Text(failedText(status))
-                        .lineLimit(1)
+                        .lineLimit(lines)
                 } else {
                     Text(okText(status))
                         .monospacedDigit()
-                        .lineLimit(1)
+                        .lineLimit(lines)
                 }
             } else {
                 Text("Waiting for the first check")
