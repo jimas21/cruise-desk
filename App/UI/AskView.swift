@@ -102,9 +102,12 @@ struct QuestionBubble: View {
             }
             if let answer = question.answer {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("Deal Desk", systemImage: "sparkles")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Palette.accent)
+                    HStack(spacing: 5) {
+                        Image(systemName: "sparkles")
+                        Text("Deal Desk")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Palette.accent)
                     Text(answer)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
@@ -116,8 +119,11 @@ struct QuestionBubble: View {
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(Array(links.enumerated()), id: \.offset) { item in
                                 Link(destination: item.element.1) {
-                                    Label(item.element.0, systemImage: "arrow.up.right.square")
-                                        .font(.footnote)
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "arrow.up.right.square")
+                                        Text(item.element.0)
+                                    }
+                                    .font(.footnote)
                                 }
                                 .buttonStyle(.borderless)
                             }

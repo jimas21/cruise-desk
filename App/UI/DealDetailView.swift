@@ -140,7 +140,10 @@ private struct DealDetailContent: View {
                     .padding(.vertical, 4)
                     .id(DetailFocus.scoop)
             } header: {
-                Label("The scoop", systemImage: "sparkles")
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                    Text("The scoop")
+                }
             }
         }
     }

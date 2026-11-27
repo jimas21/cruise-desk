@@ -20,7 +20,8 @@ struct DealRow: View {
             if deal.kind == .sale {
                 SaleLines(deal: deal)
             } else {
-                SummaryLines(deal: deal)
+                // At accessibility sizes the dates leave the header (it stacks) and lead the lines below.
+                SummaryLines(deal: deal, showDates: typeSize.isAccessibilitySize)
             }
             if let note {
                 FitCaption(note: note)
@@ -40,13 +41,21 @@ struct DealRow: View {
                     Spacer(minLength: 8)
                     chip
                 }
-                name.lineLimit(4)
+                name
             }
         } else {
+            // The dates sit beside the score ring, so the sheet reads top-down without a gap.
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     pill
-                    name.lineLimit(2)
+                    name
+                    if deal.kind != .sale, !deal.datesLine.isEmpty {
+                        Text(deal.datesLine)
+                            .font(.subheadline)
+                            .monospacedDigit()
+                            .lineLimit(2)
+                            .padding(.top, 2)
+                    }
                 }
                 Spacer(minLength: 8)
                 chip
@@ -54,11 +63,29 @@ struct DealRow: View {
         }
     }
 
-    /// "Icon of the Seas · Icon class": the ship in headline weight, its class quieter.
-    private var name: Text {
-        let ship = Text(deal.title).font(.headline)
-        guard deal.kind != .sale, let shipClass = deal.shipClass else { return ship }
-        return ship + Text("  ·  \(shipClass.title)").font(.subheadline).foregroundStyle(.secondary)
+    /// "Icon of the Seas · Icon class" on one line when it fits, else the class on its own line below.
+    @ViewBuilder
+    private var name: some View {
+        let lines = typeSize.isAccessibilitySize ? 4 : 2
+        if deal.kind != .sale, let shipClass = deal.shipClass {
+            ViewThatFits(in: .horizontal) {
+                (Text(deal.title).font(.headline)
+                    + Text("  ·  \(shipClass.title)").font(.subheadline).foregroundStyle(.secondary))
+                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(deal.title)
+                        .font(.headline)
+                        .lineLimit(lines)
+                    Text(shipClass.title)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            Text(deal.title)
+                .font(.headline)
+                .lineLimit(lines)
+        }
     }
 
     /// Only a price drop or a sale carries a pill now; whether a deal fits the trip is the bucket's job.
@@ -126,13 +153,14 @@ struct FitCaption: View {
 /// Dates, route, cabin, money, the price meter and why: one line each.
 private struct SummaryLines: View {
     let deal: Deal
+    var showDates = true
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private var lines: Int { typeSize.isAccessibilitySize ? 3 : 1 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            if !deal.datesLine.isEmpty {
+            if showDates && !deal.datesLine.isEmpty {
                 Text(deal.datesLine)
                     .font(.subheadline)
                     .monospacedDigit()
