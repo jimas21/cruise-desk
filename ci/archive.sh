@@ -19,6 +19,7 @@ for name in BUNDLE_ID TEAM_ID ASC_KEY_PATH ASC_KEY_ID ASC_ISSUER_ID DD_BASE_URL 
   [ -n "${!name:-}" ] || die "$name is not set (ci/preflight.sh and ci/asc_setup.py set the version numbers)"
 done
 test -f App/Assets.xcassets/AppIcon.appiconset/AppIcon.png || die "App icon is missing; ci/make_icon.py must run first."
+test -f App/Assets.xcassets/LaunchMark.imageset/LaunchMark.png || die "Launch mark is missing; ci/make_icon.py must run first."
 [[ "$MARKETING_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "Bad MARKETING_VERSION $MARKETING_VERSION"
 [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]] || die "Bad BUILD_NUMBER $BUILD_NUMBER"
 

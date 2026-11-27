@@ -13,29 +13,33 @@ final class SnapshotTests: XCTestCase {
         }
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let store = Store.preview()
+        let empty = Store(previewDocs: [:])
         let router = Router()
         let callDeal = try XCTUnwrap(store.deal("sample-call"))
 
-        let screens: [(name: String, view: AnyView, dark: Bool)] = [
-            ("01-deals", AnyView(RootView()), true),
-            ("02-deals-large-text", AnyView(RootView().environment(\.dynamicTypeSize, .accessibility2)), false),
-            ("03-detail-fits", AnyView(NavigationStack { DealDetailView(dealId: "sample-fits") }), true),
-            ("04-detail-answered", AnyView(NavigationStack { DealDetailView(dealId: "sample-drop") }), false),
-            ("05-detail-sale", AnyView(NavigationStack { DealDetailView(dealId: "sample-sale") }), false),
-            ("06-answer-pass", AnyView(AnswerSheet(deal: callDeal, verdict: .pass, existing: nil)), true),
-            ("07-reviewed", AnyView(ReviewedView()), false),
-            ("08-save", AnyView(SaveView()), true),
-            ("09-play", AnyView(NavigationStack { PlayDetailView(playId: "sample-live") }), false),
-            ("10-rules", AnyView(RulesView()), true),
-            ("11-status", AnyView(StatusSheet()), false),
-            ("12-settings", AnyView(NavigationStack { SettingsView() }), false),
+        let screens: [(name: String, view: AnyView, dark: Bool, store: Store)] = [
+            ("01-deals", AnyView(RootView()), true, store),
+            ("02-deals-large-text", AnyView(RootView().environment(\.dynamicTypeSize, .accessibility2)), false, store),
+            ("03-detail-fits", AnyView(NavigationStack { DealDetailView(dealId: "sample-fits") }), true, store),
+            ("04-detail-answered", AnyView(NavigationStack { DealDetailView(dealId: "sample-drop") }), false, store),
+            ("05-detail-sale", AnyView(NavigationStack { DealDetailView(dealId: "sample-sale") }), true, store),
+            ("06-answer-pass", AnyView(AnswerSheet(deal: callDeal, verdict: .pass, existing: nil)), true, store),
+            ("07-reviewed", AnyView(ReviewedView()), true, store),
+            ("08-save", AnyView(SaveView()), true, store),
+            ("09-play", AnyView(NavigationStack { PlayDetailView(playId: "sample-live") }), false, store),
+            ("10-rules", AnyView(RulesView()), true, store),
+            ("11-status", AnyView(StatusSheet()), false, store),
+            ("12-settings", AnyView(NavigationStack { SettingsView() }), false, store),
+            ("13-detail-call", AnyView(NavigationStack { DealDetailView(dealId: "sample-call") }), true, store),
+            ("14-empty-deals", AnyView(RootView()), true, empty),
+            ("15-empty-reviewed", AnyView(ReviewedView()), false, empty),
         ]
 
         for screen in screens {
             let styles: [UIUserInterfaceStyle] = screen.dark ? [.light, .dark] : [.light]
             for style in styles {
                 let view = screen.view
-                    .environmentObject(store)
+                    .environmentObject(screen.store)
                     .environmentObject(router)
                     .tint(Palette.accent)
                 let image = try await render(view, style: style)

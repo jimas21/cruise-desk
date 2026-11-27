@@ -10,6 +10,21 @@ enum Palette {
     static let sale = dynamic(light: 0x7A3E8F, dark: 0xC48BD8)
     /// Text on a filled accent shape (white on #0B6E8A; near-black on the brighter dark-mode #3FB3D1).
     static let onAccent = dynamic(light: 0xFFFFFF, dark: 0x05232D)
+    /// Warm gold, only for the gentle highlight on Exceptional deals (ring end and card edge).
+    static let highlight = dynamic(light: 0xD99A2B, dark: 0xF2C46B)
+    /// Card surface on the grouped background.
+    static let card = Color(uiColor: .secondarySystemGroupedBackground)
+
+    /// The detail hero's deep gradient for each kind. Fixed in both modes so white text always reads on it.
+    static func hero(_ kind: DealKind?) -> [Color] {
+        switch kind {
+        case .fits?: return [Color(hex: 0x1D7F4E), Color(hex: 0x0B6E8A)]
+        case .call?: return [Color(hex: 0x9A6512), Color(hex: 0x6E3F14)]
+        case .drop?: return [Color(hex: 0x0E7C99), Color(hex: 0x0A3F5C)]
+        case .sale?: return [Color(hex: 0x7A3E8F), Color(hex: 0x3B2C7A)]
+        case nil: return [Color(hex: 0x0B6E8A), Color(hex: 0x0A3F5C)]
+        }
+    }
 
     static func kind(_ kind: DealKind) -> Color {
         switch kind {
@@ -42,56 +57,137 @@ enum Palette {
     }
 }
 
-/// [FITS] [YOUR CALL] [PRICE DROP] [SALE]
-struct KindPill: View {
-    let kind: DealKind
-
-    var body: some View {
-        Text(kind.pill)
-            .font(.caption2.weight(.bold))
-            .tracking(0.5)
-            .foregroundStyle(Palette.kind(kind))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(Palette.kind(kind).opacity(0.14), in: Capsule())
-            .accessibilityLabel(Text(kind.title))
+extension DealKind {
+    var symbol: String {
+        switch self {
+        case .fits: return "checkmark.seal.fill"
+        case .call: return "questionmark.diamond.fill"
+        case .drop: return "arrow.down.right"
+        case .sale: return "tag.fill"
+        }
     }
 }
 
-/// The score in a rounded square with its label below ("70" / "Great").
-struct ScoreChip: View {
+extension Deal {
+    var isExceptional: Bool { data.scoreLabel == "Exceptional" }
+}
+
+/// [✓ FITS] [? YOUR CALL] [↘ PRICE DROP] [SALE]: the only place kind colours appear on a list.
+/// `onColor` is the white version used on the detail hero.
+struct KindPill: View {
+    let kind: DealKind
+    var onColor = false
+
+    var body: some View {
+        let tint = onColor ? Color.white : Palette.kind(kind)
+        HStack(spacing: 4) {
+            Image(systemName: kind.symbol)
+                .font(.system(size: 9, weight: .heavy))
+                .imageScale(.small)
+            Text(kind.pill)
+                .font(.system(.caption2, design: .rounded, weight: .bold))
+                .tracking(0.6)
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(tint.opacity(onColor ? 0.2 : 0.12), in: Capsule())
+        .overlay(Capsule().strokeBorder(tint.opacity(onColor ? 0.35 : 0.22), lineWidth: 0.75))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(kind.title))
+    }
+}
+
+/// The deal score as a ring gauge (the ring fills to the score out of 100), its label below ("70" / "Great").
+/// Exceptional deals get a teal-to-gold ring with a soft glow.
+struct ScoreRing: View {
     let score: Int
     let label: String?
-    @ScaledMetric(relativeTo: .title3) private var side: CGFloat = 40
+    var onColor = false
+    @ScaledMetric(relativeTo: .title3) private var side: CGFloat = 44
 
-    private var strong: Bool { label == "Exceptional" }
+    private var exceptional: Bool { label == "Exceptional" }
+    private var fraction: Double { min(max(Double(score), 0), 100) / 100 }
 
     private var spoken: String {
         if let label, !label.isEmpty { return "Score \(score), \(label)" }
         return "Score \(score)"
     }
 
+    private var ring: AnyShapeStyle {
+        if onColor { return AnyShapeStyle(Color.white) }
+        if exceptional {
+            return AnyShapeStyle(AngularGradient(colors: [Palette.accent, Palette.highlight, Palette.accent],
+                                                 center: .center, startAngle: .degrees(-90), endAngle: .degrees(270)))
+        }
+        return AnyShapeStyle(Palette.accent)
+    }
+
     var body: some View {
-        VStack(spacing: 3) {
-            Text(String(score))
-                .font(.title3.weight(.bold))
-                .monospacedDigit()
-                .foregroundStyle(strong ? Palette.onAccent : Palette.accent)
-                .frame(minWidth: side, minHeight: side)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(strong ? Palette.accent : Palette.accent.opacity(0.13))
-                )
+        let line = max(side * 0.1, 3.5)
+        VStack(spacing: 4) {
+            ZStack {
+                Circle()
+                    .stroke(onColor ? Color.white.opacity(0.25) : Palette.accent.opacity(0.14), lineWidth: line)
+                Circle()
+                    .trim(from: 0, to: fraction)
+                    .stroke(ring, style: StrokeStyle(lineWidth: line, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .shadow(color: exceptional && !onColor ? Palette.highlight.opacity(0.45) : .clear, radius: 4)
+                Text(String(score))
+                    .font(.system(.headline, design: .rounded, weight: .bold))
+                    .monospacedDigit()
+                    .foregroundStyle(onColor ? Color.white : Color.primary)
+                    .minimumScaleFactor(0.7)
+                    .padding(line)
+            }
+            .frame(width: side, height: side)
             if let label, !label.isEmpty {
                 Text(label)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .font(.system(.caption2, design: .rounded, weight: .semibold))
+                    .foregroundStyle(onColor ? Color.white.opacity(0.85) : (exceptional ? Palette.highlight : Color.secondary))
                     .lineLimit(1)
             }
         }
         .fixedSize()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(spoken))
+    }
+}
+
+/// A deal card: continuous corners, a soft shadow in light mode, a hairline edge in dark mode, and a gentle
+/// teal-to-gold edge when the deal is Exceptional.
+struct CardBackground: View {
+    var highlight = false
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+        shape
+            .fill(Palette.card)
+            .shadow(color: Color.black.opacity(scheme == .dark ? 0 : 0.07), radius: 9, x: 0, y: 3)
+            .shadow(color: highlight ? Palette.highlight.opacity(scheme == .dark ? 0.18 : 0.16) : .clear, radius: 10, x: 0, y: 2)
+            .overlay {
+                if highlight {
+                    shape.strokeBorder(LinearGradient(colors: [Palette.accent.opacity(0.7), Palette.highlight],
+                                                      startPoint: .topLeading, endPoint: .bottomTrailing),
+                                       lineWidth: 1.5)
+                } else if scheme == .dark {
+                    shape.strokeBorder(Color.white.opacity(0.07), lineWidth: 0.75)
+                }
+            }
+    }
+}
+
+/// Cards sink slightly under a finger (not under Reduce Motion).
+struct CardPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.975 : 1)
+            .brightness(configuration.isPressed ? -0.02 : 0)
+            .animation(.spring(response: 0.28, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 
@@ -189,21 +285,30 @@ struct ChipPicker: View {
     private func chip(_ option: ReasonOption) -> some View {
         let on = selection.contains(option.id)
         return Button {
-            if on {
-                selection.remove(option.id)
-            } else {
-                selection.insert(option.id)
+            withAnimation(Motion.snappy) {
+                if on {
+                    selection.remove(option.id)
+                } else {
+                    selection.insert(option.id)
+                }
             }
             Haptics.tap()
         } label: {
-            Text(option.title)
-                .font(.subheadline.weight(.medium))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .foregroundStyle(on ? Palette.onAccent : Color.primary)
-                .background(Capsule().fill(on ? Palette.accent : Color(uiColor: .tertiarySystemFill)))
+            HStack(spacing: 4) {
+                if on {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.bold))
+                        .transition(.scale.combined(with: .opacity))
+                }
+                Text(option.title)
+            }
+            .font(.subheadline.weight(.medium))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .foregroundStyle(on ? Palette.onAccent : Color.primary)
+            .background(Capsule().fill(on ? Palette.accent : Color(uiColor: .tertiarySystemFill)))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardPressStyle())
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 }

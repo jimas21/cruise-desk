@@ -122,9 +122,11 @@ struct AnswerSheet: View {
 
     private func send() {
         let chosen = verdict.options.map { $0.id }.filter { reasons.contains($0) }
-        store.answer(deal, verdict: verdict, reasons: chosen, note: note.trimmed)
-        if verdict == .pass, makeRule, !ruleText.trimmed.isEmpty {
-            store.addRule(text: ruleText.trimmed, unless: ruleUnless.trimmed, fromDeal: deal.id)
+        withAnimation(Motion.spring) {
+            store.answer(deal, verdict: verdict, reasons: chosen, note: note.trimmed)
+            if verdict == .pass, makeRule, !ruleText.trimmed.isEmpty {
+                store.addRule(text: ruleText.trimmed, unless: ruleUnless.trimmed, fromDeal: deal.id)
+            }
         }
         dismiss()
     }

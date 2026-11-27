@@ -26,16 +26,18 @@ private struct DealDetailContent: View {
     let feedback: Feedback?
     let pending: Bool
     @State private var answering: Verdict?
+    @State private var heroGone = false
 
     private var d: DealData { deal.data }
 
     var body: some View {
         List {
             Section {
-                summary
+                DealHero(deal: deal)
             }
             .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
+            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            .listRowSeparator(.hidden)
 
             if let feedback, feedback.verdict != nil {
                 answerSection(feedback)
@@ -60,38 +62,24 @@ private struct DealDetailContent: View {
             }
         }
         .listStyle(.insetGrouped)
+        .listSectionSpacing(.compact)
+        .modifier(ScrolledPast(threshold: 150, passed: $heroGone))
         .navigationTitle(deal.title)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // The hero carries the name; the bar shows it only once the hero has scrolled away.
+            ToolbarItem(placement: .principal) {
+                Text(deal.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .opacity(heroGone ? 1 : 0)
+                    .accessibilityHidden(!heroGone)
+            }
+        }
         .safeAreaInset(edge: .bottom) { bottomBar }
         .sheet(item: $answering) { verdict in
             AnswerSheet(deal: deal, verdict: verdict, existing: feedback)
         }
-    }
-
-    // MARK: Header
-
-    private var summary: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                if let kind = deal.kind { KindPill(kind: kind) }
-                if deal.kind == .call, let breaks = d.breaks, !breaks.isEmpty {
-                    Text("Breaks: \(breaks)")
-                        .font(.caption)
-                        .foregroundStyle(Palette.call)
-                }
-            }
-            if deal.kind == .sale {
-                if let ends = deal.endsDay {
-                    Text("Ends \(Fmt.deadline(ends))").font(.subheadline)
-                }
-            } else {
-                if !deal.tripLine.isEmpty {
-                    Text(deal.tripLine).font(.subheadline)
-                }
-                MoneyLine(deal: deal)
-            }
-        }
-        .accessibilityElement(children: .combine)
     }
 
     // MARK: Your answer
@@ -295,9 +283,11 @@ private struct DealDetailContent: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
                         .tint(Palette.verdict(verdict))
                     }
                 }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             HStack(spacing: 10) {
                 if let url = deal.link {
@@ -308,6 +298,7 @@ private struct DealDetailContent: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
                     .controlSize(.large)
                     .accessibilityHint(Text(openHint))
                     ShareLink(item: url, subject: Text(deal.title), message: Text(shareText)) {
@@ -315,6 +306,7 @@ private struct DealDetailContent: View {
                             .font(.headline)
                     }
                     .buttonStyle(.bordered)
+                    .buttonBorderShape(.circle)
                     .controlSize(.large)
                     .accessibilityLabel(Text("Share"))
                 }
@@ -370,6 +362,85 @@ private struct SourceRow: View {
                 .foregroundStyle(Color.primary)
         } else {
             label
+        }
+    }
+}
+
+/// The detail view's hero: the kind's deep gradient with slow swells, the ship name large, and the glance
+/// numbers in white. Nothing here that the row does not already say.
+struct DealHero: View {
+    let deal: Deal
+
+    private var d: DealData { deal.data }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let kind = deal.kind {
+                        KindPill(kind: kind, onColor: true)
+                    }
+                    if deal.kind == .call, let breaks = d.breaks, !breaks.isEmpty {
+                        Text("Breaks: \(breaks)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.white.opacity(0.92))
+                    }
+                }
+                Spacer(minLength: 8)
+                if let score = d.score {
+                    ScoreRing(score: score, label: d.scoreLabel, onColor: true)
+                }
+            }
+            Text(deal.title)
+                .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                .foregroundStyle(Color.white)
+                .lineLimit(3)
+                .minimumScaleFactor(0.7)
+                .accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: 6) {
+                if deal.kind == .sale {
+                    if let ends = deal.endsDay {
+                        Text("Ends \(Fmt.deadline(ends))")
+                            .font(.headline)
+                            .monospacedDigit()
+                            .foregroundStyle(Color.white)
+                    }
+                } else {
+                    if !deal.tripLine.isEmpty {
+                        Text(deal.tripLine)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Color.white.opacity(0.92))
+                    }
+                    MoneyLine(deal: deal, onColor: true)
+                        .padding(.top, 2)
+                }
+            }
+            .accessibilityElement(children: .combine)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 18)
+        .padding(.bottom, 34)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background { HeroBackdrop(kind: deal.kind) }
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+    }
+}
+
+/// Sets `passed` once the list has scrolled more than `threshold` points (iOS 18+; on iOS 17 it stays true, so
+/// the bar always shows the title there).
+private struct ScrolledPast: ViewModifier {
+    let threshold: CGFloat
+    @Binding var passed: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top > threshold
+            } action: { _, now in
+                withAnimation(.easeInOut(duration: 0.2)) { passed = now }
+            }
+        } else {
+            content.onAppear { passed = true }
         }
     }
 }

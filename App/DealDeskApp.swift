@@ -28,7 +28,7 @@ struct RootView: View {
     var body: some View {
         TabView(selection: $router.tab) {
             DealsView()
-                .tabItem { Label("Deals", systemImage: "tray.full") }
+                .tabItem { Label("Deals", systemImage: "ferry") }
                 .badge(store.unansweredCount)
                 .tag(AppTab.deals)
             ReviewedView()

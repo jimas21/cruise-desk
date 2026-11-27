@@ -71,7 +71,7 @@ struct DealRow: View {
     @ViewBuilder
     private var chip: some View {
         if let score = deal.data.score {
-            ScoreChip(score: score, label: deal.data.scoreLabel)
+            ScoreRing(score: score, label: deal.data.scoreLabel)
         }
     }
 }
@@ -131,8 +131,12 @@ struct CabinLine: View {
 }
 
 /// The money line: the family's total large (or the per-person price when there is no total), details small.
+/// `onColor` is the white version for the detail hero.
 struct MoneyLine: View {
     let deal: Deal
+    var onColor = false
+
+    private var quiet: Color { onColor ? Color.white.opacity(0.8) : Color.secondary }
 
     private var big: (amount: Int, unit: String)? {
         if let total = deal.data.totalFor3 { return (total, "for 3") }
@@ -165,11 +169,12 @@ struct MoneyLine: View {
     private func bigText(_ amount: Int, _ unit: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             Text(Fmt.usd(amount))
-                .font(.title2.weight(.semibold))
+                .font(.system(onColor ? Font.TextStyle.title : Font.TextStyle.title2, design: .rounded, weight: .semibold))
                 .monospacedDigit()
+                .foregroundStyle(onColor ? Color.white : Color.primary)
             Text(unit)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(quiet)
         }
     }
 
@@ -181,7 +186,7 @@ struct MoneyLine: View {
             if let drop = deal.dropPP {
                 if perPerson != nil { Text("·") }
                 Text("↓ \(Fmt.usd(drop)) pp")
-                    .foregroundStyle(Palette.accent)
+                    .foregroundStyle(onColor ? Color.white : Palette.accent)
                     .fontWeight(.semibold)
             }
             if let usual = deal.data.usualPP {
@@ -190,9 +195,43 @@ struct MoneyLine: View {
             }
         }
         .font(.footnote)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(quiet)
         .monospacedDigit()
         .lineLimit(1)
+    }
+}
+
+/// A deal row drawn as a card, the way the Deals and Reviewed lists show it. The footer (Claude's reply on
+/// Reviewed) sits inside the same card.
+struct DealCard<Footer: View>: View {
+    let deal: Deal
+    @ViewBuilder let footer: () -> Footer
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            DealRow(deal: deal)
+            footer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(CardBackground(highlight: deal.isExceptional))
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
+extension DealCard where Footer == EmptyView {
+    init(deal: Deal) {
+        self.init(deal: deal, footer: { EmptyView() })
+    }
+}
+
+extension View {
+    /// A list row that is only its own card: no inset, no cell background, no separator.
+    func cardRow() -> some View {
+        listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
     }
 }
 
@@ -244,7 +283,7 @@ private struct SaleLines: View {
 #Preview("Rows") {
     List {
         ForEach(Samples.deals) { deal in
-            DealRow(deal: deal)
+            DealCard(deal: deal).cardRow()
         }
     }
 }

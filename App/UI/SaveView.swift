@@ -39,11 +39,8 @@ struct SaveView: View {
             .listStyle(.insetGrouped)
             .overlay {
                 if store.plays.isEmpty {
-                    ContentUnavailableView {
-                        Label("No ways to save yet", systemImage: "tag")
-                    } description: {
-                        Text("Sales, promo codes and tricks Claude finds land here, with their deadlines.")
-                    }
+                    IllustratedEmpty(title: "No ways to save yet",
+                                     message: "Sales, promo codes and tricks Claude finds land here, with their deadlines.")
                 }
             }
             .navigationTitle("Save")
@@ -74,13 +71,13 @@ private struct PlayRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 if let saves = play.data.saves, !saves.isEmpty {
                     Text(saves)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.system(.title3, design: .rounded, weight: .semibold))
                         .monospacedDigit()
                         .foregroundStyle(Palette.accent)
                 }
                 Spacer(minLength: 8)
                 if let deadline = play.deadlineDay {
-                    Text(Fmt.deadline(deadline))
+                    Label(Fmt.deadline(deadline), systemImage: "clock")
                         .font(.footnote.weight(.medium))
                         .monospacedDigit()
                         .foregroundStyle(Fmt.daysLeft(deadline) <= 2 ? Palette.call : Color.secondary)

@@ -2,6 +2,7 @@
 
 # Generated at build time
 App/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+App/Assets.xcassets/LaunchMark.imageset/LaunchMark.png
 *.xcodeproj
 *.xcworkspace
 build/

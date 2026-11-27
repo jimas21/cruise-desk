@@ -36,6 +36,14 @@ One-time steps only the account holder can do:
 2. Create an APNs key (.p8) in the developer portal (Keys > + > Apple Push Notifications service) and give it to
    the deal server, which sends the alerts.
 
+## Artwork
+
+All original, no trademarks and no text. The app icon and the launch-screen mark are drawn at build time by
+`ci/make_icon.py` (Pillow): a porthole looking out on a golden-hour sea with a small ship on the horizon. Inside the
+app everything is vector SwiftUI (`App/UI/Art.swift`): the sea scene at the top of Deals (a night sky with moon and
+stars in dark mode), the kind-tinted hero behind a deal's name, and the calm-sea pictures on empty screens. The waves
+drift slowly and stand still under Reduce Motion; the art is hidden from VoiceOver.
+
 ## Settings on the phone
 
 The build carries the server address and app token (Info.plist `DDBaseURL` / `DDAppToken`, injected by CI; the

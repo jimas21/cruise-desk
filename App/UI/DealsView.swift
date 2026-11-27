@@ -64,23 +64,19 @@ struct DealsView: View {
         NavigationStack(path: $router.dealsPath) {
             List {
                 Section {
-                    Picker("Show", selection: $filter) {
+                    DealsHeader(status: store.status, syncing: store.syncing) { showStatus = true }
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    Picker("Show", selection: $filter.animation(Motion.snappy)) {
                         ForEach(DealFilter.allCases) { option in
                             Text(option.title).tag(option)
                         }
                     }
                     .pickerStyle(.segmented)
-                    .listRowInsets(EdgeInsets())
+                    .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 2, trailing: 0))
                     .listRowBackground(Color.clear)
-                } header: {
-                    Button {
-                        showStatus = true
-                    } label: {
-                        CheckLine(status: store.status, syncing: store.syncing)
-                    }
-                    .buttonStyle(.plain)
-                    .textCase(nil)
-                    .padding(.bottom, 4)
+                    .listRowSeparator(.hidden)
                 }
 
                 if let problem = store.problem {
@@ -91,13 +87,19 @@ struct DealsView: View {
                     Section {
                         EmptyInbox(filter: filter, anyDeals: !store.inbox.isEmpty)
                             .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
                 } else {
                     Section {
                         ForEach(items) { deal in
-                            NavigationLink(value: deal.id) {
-                                DealRow(deal: deal)
+                            Button {
+                                router.dealsPath.append(deal.id)
+                            } label: {
+                                DealCard(deal: deal)
                             }
+                            .buttonStyle(CardPressStyle())
+                            .cardRow()
+                            .accessibilityHint(Text("Opens the details"))
                             .swipeActions(edge: .leading, allowsFullSwipe: true) {
                                 Button {
                                     answering = AnswerTarget(deal: deal, verdict: .interested)
@@ -114,7 +116,9 @@ struct DealsView: View {
                                 }
                                 .tint(.red)
                                 Button {
-                                    store.answer(deal, verdict: .later, reasons: [], note: "")
+                                    withAnimation(Motion.spring) {
+                                        store.answer(deal, verdict: .later, reasons: [], note: "")
+                                    }
                                 } label: {
                                     Label("Later", systemImage: Verdict.later.symbol)
                                 }
@@ -127,13 +131,17 @@ struct DealsView: View {
                                 answering = AnswerTarget(deal: deal, verdict: .pass)
                             }
                             .accessibilityAction(named: Text("Later")) {
-                                store.answer(deal, verdict: .later, reasons: [], note: "")
+                                withAnimation(Motion.spring) {
+                                    store.answer(deal, verdict: .later, reasons: [], note: "")
+                                }
                             }
                         }
                     }
                 }
             }
             .listStyle(.insetGrouped)
+            .listSectionSpacing(.compact)
+            .onChange(of: filter) { Haptics.tap() }
             .navigationTitle("Deals")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -173,6 +181,36 @@ struct DealsView: View {
                 AnswerSheet(deal: target.deal, verdict: target.verdict, existing: nil)
             }
         }
+    }
+}
+
+/// The top of the Deals tab: a small sea scene (day sky, or night sky in dark mode) with the check line on a
+/// frosted label at its foot. Tapping it opens the status sheet.
+struct DealsHeader: View {
+    let status: RunStatus?
+    let syncing: Bool
+    let onTap: () -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 0) {
+                Spacer(minLength: typeSize.isAccessibilitySize ? 64 : 96)
+                CheckLine(status: status, syncing: syncing)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .padding(12)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background { SeaScene() }
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.75)
+            }
+        }
+        .buttonStyle(CardPressStyle())
     }
 }
 
@@ -281,17 +319,10 @@ private struct EmptyInbox: View {
 
     var body: some View {
         if filter != .all && anyDeals {
-            ContentUnavailableView {
-                Label("None in \(filter.title)", systemImage: "line.3.horizontal.decrease.circle")
-            } description: {
-                Text("Other deals are waiting under All.")
-            }
+            IllustratedEmpty(title: "None in \(filter.title)", message: "Other deals are waiting under All.")
         } else {
-            ContentUnavailableView {
-                Label("All caught up", systemImage: "checkmark.seal")
-            } description: {
-                Text("No deals waiting for an answer. Claude checks every hour and pings you when one is worth a look.")
-            }
+            IllustratedEmpty(title: "All caught up",
+                             message: "No deals waiting for an answer. Claude checks every hour and pings you when one is worth a look.")
         }
     }
 }
