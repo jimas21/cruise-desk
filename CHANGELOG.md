@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/jimas21/cruise-desk/compare/v1.2.1...v1.3.0) (2026-11-27)
+
+
+### Features
+
+* Deal Desk v3: any cruise line, Track a cruise, full tailoring, coverage per line, refresh on open ([aca35e8](https://github.com/jimas21/cruise-desk/commit/aca35e802107ff47fd5ae90df8d7c0ffbea7502e))
+
 ## [1.2.1](https://github.com/jimas21/cruise-desk/compare/v1.2.0...v1.2.1) (2026-11-27)
 
 
