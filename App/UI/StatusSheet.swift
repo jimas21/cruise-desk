@@ -41,7 +41,7 @@ struct StatusSheet: View {
                         }
                     }
                 }
-                Section("This phone") {
+                Section {
                     if let synced = store.lastSync {
                         InfoRow(label: "Last synced", value: Fmt.when(synced))
                     }
@@ -64,6 +64,10 @@ struct StatusSheet: View {
                     NavigationLink("Settings") {
                         SettingsView()
                     }
+                } header: {
+                    Text("This phone")
+                } footer: {
+                    Text("Deal Desk \(AppVersion.display)")
                 }
             }
             .listStyle(.insetGrouped)

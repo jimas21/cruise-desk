@@ -188,3 +188,13 @@ enum Speech {
         return parts.joined(separator: ". ")
     }
 }
+
+/// The running build as "X.Y.Z (N)": the version from release-please, the build number from the TestFlight run.
+enum AppVersion {
+    static var display: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "\(short) (\(build))"
+    }
+}

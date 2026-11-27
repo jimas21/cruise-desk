@@ -14,13 +14,6 @@ struct SettingsView: View {
     @State private var testing = false
     @State private var alerts: UNAuthorizationStatus = .notDetermined
 
-    private var version: String {
-        let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
-        let build = info?["CFBundleVersion"] as? String ?? "?"
-        return "\(short) (\(build))"
-    }
-
     var body: some View {
         Form {
             Section {
@@ -107,7 +100,7 @@ struct SettingsView: View {
             }
 
             Section {
-                InfoRow(label: "Version", value: version)
+                InfoRow(label: "Version", value: AppVersion.display)
             }
         }
         .navigationTitle("Settings")
