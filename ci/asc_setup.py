@@ -78,7 +78,8 @@ def ensure_bundle_id(identifier: str) -> str:
 
 
 def ensure_push(bundle_resource_id: str) -> None:
-    caps = call("GET", f"/bundleIds/{bundle_resource_id}/bundleIdCapabilities", query={"limit": "200"})
+    # This relationship endpoint rejects `limit` (HTTP 400), and a bundle ID has only a handful of capabilities.
+    caps = call("GET", f"/bundleIds/{bundle_resource_id}/bundleIdCapabilities")
     if any(c["attributes"].get("capabilityType") == "PUSH_NOTIFICATIONS" for c in caps.get("data", [])):
         print("Push Notifications: already on for the bundle ID.")
         return
