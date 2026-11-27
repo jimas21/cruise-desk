@@ -139,7 +139,9 @@ private struct SeaPainter {
 
     func paint(_ ctx: inout GraphicsContext, _ size: CGSize) {
         let w = size.width, h = size.height
-        let horizon = (h * 0.48).rounded()
+        // Anchored to the top: when large text makes the header taller, the extra height is sea at the bottom
+        // (under the check line), so the ship stays in view.
+        let horizon = min((h * 0.48).rounded(), 76)
 
         let skyColors: [Color] = night
             ? [Color(hex: 0x06142A), Color(hex: 0x0E2A48), Color(hex: 0x1D4A69)]
@@ -172,8 +174,8 @@ private struct SeaPainter {
                                        endPoint: CGPoint(x: 0, y: h)))
 
         let back = Swell(baseline: horizon + 2, amplitude: 1.6, wavelength: w * 0.34, speed: 0.35, offset: 0.4)
-        let mid = Swell(baseline: horizon + h * 0.12, amplitude: 3.2, wavelength: w * 0.55, speed: -0.42, offset: 1.3)
-        let front = Swell(baseline: horizon + h * 0.27, amplitude: 4.6, wavelength: w * 0.8, speed: 0.55, offset: 2.6)
+        let mid = Swell(baseline: horizon + min(h * 0.12, 19), amplitude: 3.2, wavelength: w * 0.55, speed: -0.42, offset: 1.3)
+        let front = Swell(baseline: horizon + min(h * 0.27, 42), amplitude: 4.6, wavelength: w * 0.8, speed: 0.55, offset: 2.6)
 
         ctx.fill(back.body(width: w, bottom: h, time: time), with: .color(night ? Color(hex: 0x1A4D6B) : Color(hex: 0x86C9DB)))
 
