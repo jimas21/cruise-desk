@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.2](https://github.com/jimas21/cruise-desk/compare/v1.5.1...v1.5.2) (2026-11-28)
+
+
+### Fixes
+
+* port picker argument order breaks the compile ([24bedd5](https://github.com/jimas21/cruise-desk/commit/24bedd560485fd529c4da0451dadb751358ded09))
+
 ## [1.5.1](https://github.com/jimas21/cruise-desk/compare/v1.5.0...v1.5.1) (2026-11-28)
 
 
