@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/jimas21/cruise-desk/compare/v1.4.0...v1.5.0) (2026-11-28)
+
+
+### Features
+
+* Deal Desk v5: any line, port and region from the catalog, the trip cost and verdict, ship sizes to scale ([ee360fa](https://github.com/jimas21/cruise-desk/commit/ee360fa4f3f6320592e85902440387f4e01205ec))
+
 ## [1.4.0](https://github.com/jimas21/cruise-desk/compare/v1.3.0...v1.4.0) (2026-11-28)
 
 

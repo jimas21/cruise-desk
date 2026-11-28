@@ -24,7 +24,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.REPLACE.dealdesk   # placeholder; CI overrides from secret DEALDESK_BUNDLE_ID
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: Config/DealDesk.entitlements
-        MARKETING_VERSION: "1.4.0"                       # x-release-please-version
+        MARKETING_VERSION: "1.5.0"                       # x-release-please-version
         CURRENT_PROJECT_VERSION: "1"                     # CI overrides
         INFOPLIST_FILE: Config/Info.plist
         GENERATE_INFOPLIST_FILE: "NO"
