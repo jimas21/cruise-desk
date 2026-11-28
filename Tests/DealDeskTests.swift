@@ -79,9 +79,15 @@ final class ModelTests: XCTestCase {
 
     func testSpeechReadsTheGlance() throws {
         let raw = try JSONDecoder().decode(RawDoc.self, from: Data(serverDeal.utf8))
+        // The party comes from the trip settings (v5: no label assumes 3).
+        let saved = PartyText.current
+        defer { PartyText.current = saved }
+        PartyText.current = (adults: 2, children: 1)
         let spoken = Speech.deal(try XCTUnwrap(Deal(raw: raw)), fails: ["4 nights"])
         XCTAssertTrue(spoken.hasPrefix("Icon of the Seas, Icon class."), spoken)
         XCTAssertTrue(spoken.contains("$2,580 for 3"))
+        PartyText.current = (adults: 2, children: 0)
+        XCTAssertTrue(Speech.deal(try XCTUnwrap(Deal(raw: raw))).contains("$2,580 for 2"))
         XCTAssertTrue(spoken.contains("Ocean View Balcony, type not confirmed"))
         XCTAssertTrue(spoken.contains("Price 25 percent under typical, $1,520"))
         XCTAssertTrue(spoken.contains("Score 70, Great"))

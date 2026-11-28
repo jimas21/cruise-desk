@@ -167,6 +167,8 @@ struct Deal: Identifiable, Hashable {
     /// Read on their own, so an odd value there never hides the deal.
     var booking: BookingInfo? = nil
     var alternatives: [BookAlternative] = []
+    /// v5: the trip cost for the party and a verdict, built by the server. Read on its own, like booking.
+    var sheet: DealSheet? = nil
 
     init?(raw: RawDoc) {
         guard let decoded = raw.data.decode(DealData.self) else { return nil }
@@ -175,6 +177,7 @@ struct Deal: Identifiable, Hashable {
         data = decoded
         booking = BookingInfo.from(raw.data)
         alternatives = BookAlternative.from(raw.data)
+        sheet = DealSheet.from(raw.data)
     }
 
     init(id: String, data: DealData, booking: BookingInfo? = nil, alternatives: [BookAlternative] = []) {
@@ -354,10 +357,12 @@ struct Deal: Identifiable, Hashable {
         return PriceRange(price: price, low: low, typical: typical, high: high)
     }
 
-    /// For sorting and the budget check: the family total, else per person x 3 (a screen, not a quote).
+    /// For sorting and the budget check: the trip cost's low end (v5), else the family total, else per person x
+    /// the party (a screen, not a quote).
     var totalEstimate: Int? {
+        if let sheet, let low = sheet.total?.low ?? sheet.total?.firm, low > 0 { return low }
         if let total = data.totalFor3, total > 0 { return total }
-        if let pp = data.pricePP, pp > 0 { return pp * 3 }
+        if let pp = data.pricePP, pp > 0 { return pp * PartyText.guests }
         return nil
     }
 

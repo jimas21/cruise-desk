@@ -16,8 +16,10 @@ final class SnapshotTests: XCTestCase {
         let older = Store(previewDocs: Samples.docs, level: .v2)
         let store = Store.preview()
         let empty = Store(previewDocs: [:])
-        // v4 last: its catalog is a superset of v3's.
         let v4 = Store.previewV4()
+        // v5 last: its catalog is a superset of v4's (the screens read the last store's catalog).
+        let v5 = Store.previewV5()
+        let firstRow = try XCTUnwrap(Samples.searchResult.rows.first)
         let router = Router()
         let callDeal = try XCTUnwrap(store.deal("sample-call"))
         let iconPlan = try XCTUnwrap(v4.plan("plan-sample-icon"))
@@ -92,6 +94,28 @@ final class SnapshotTests: XCTestCase {
             ("50-settings-booking", AnyView(NavigationStack { SettingsView() }), false, v4),
             ("51-search-coming-soon", AnyView(SearchView()), false, store),
             ("52-my-trips-coming-soon", AnyView(TrackingView(side: .trips)), false, store),
+            // v5
+            ("53-search-explained", AnyView(SearchView(initialQuery: Samples.disneyAlaska)), true, v5),
+            ("54-deal-sheet", detail("sample-fits"), true, v5),
+            ("55-deal-sheet-large-text", AnyView(NavigationStack { DealDetailView(dealId: "sample-fits") }
+                .environment(\.dynamicTypeSize, .accessibility2)), false, v5),
+            ("56-tracked-sheet", AnyView(NavigationStack { TrackedDetailView(trackedId: "trk-sample-star") }), false, v5),
+            ("57-sailing-sheet", AnyView(NavigationStack { SailingSheetScreen(row: firstRow) }), true, v5),
+            ("58-deals-default-banner", AnyView(RootView()), true, v5),
+            ("59-my-lines-collect", AnyView(NavigationStack { LinesView() }), true, v5),
+            ("60-search-pickers", AnyView(SearchFiltersSheet(query: .constant(Samples.disneyAlaska))), false, v5),
+            ("61-port-picker", AnyView(NavigationStack {
+                PortPickerScreen(title: "Leaving from", kind: .embark, selection: .constant(["Vancouver"]))
+            }), false, v5),
+            ("62-region-picker", AnyView(NavigationStack { RegionPickerScreen(selection: .constant(["Caribbean"])) }),
+             false, v5),
+            ("63-filters-catalog", AnyView(FilterSheet(filters: .constant(DealFilters()), deals: v5.inbox)), false, v5),
+            ("64-my-trip-pickers", AnyView(TripEditor(start: Samples.trip)), false, v5),
+            ("65-ship-sizes", AnyView(NavigationStack { ShipSizesView() }), true, v5),
+            ("66-ship-sheet", AnyView(ShipSheet(ref: ShipRef(line: "Norwegian", name: "Norwegian Getaway"))), true, v5),
+            ("67-addons-guide", AnyView(NavigationStack { AddonsGuideView(line: "Royal Caribbean") }), false, v5),
+            ("68-trip-cost-settings", AnyView(NavigationStack { TripCostSettingsView() }), false, v5),
+            ("69-settings-v5", AnyView(NavigationStack { SettingsView() }), false, v5),
         ]
 
         for screen in screens {

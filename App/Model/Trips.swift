@@ -70,6 +70,8 @@ struct PastTrip: Identifiable, Hashable {
     let data: PastTripData
     /// Saved on this phone and not on the deal server yet.
     var isLocal = false
+    /// v5: what we had on board (drinks package, Wi-Fi, a promo), read on its own (CONTRACT_V5 section 3.5).
+    var extras: [TripExtra] = []
 
     init?(raw: RawDoc, isLocal: Bool = false) {
         guard let decoded = raw.data.decode(PastTripData.self) else { return nil }
@@ -77,6 +79,7 @@ struct PastTrip: Identifiable, Hashable {
         version = raw.version
         data = decoded
         self.isLocal = isLocal
+        extras = TripExtra.from(raw.data)
     }
 
     init(id: String, data: PastTripData) {
@@ -142,6 +145,8 @@ struct TripDraft: Equatable {
     var notes: String = ""
     /// manual | catalog (the ports came from Deal Desk's fare data)
     var via: String = "manual"
+    /// v5: what we had on board; sent only when the server lists `reference`.
+    var extras: [TripExtra] = []
 
     init() {}
 
@@ -157,6 +162,7 @@ struct TripDraft: Equatable {
         pricePaidPP = trip.data.pricePaidPP
         notes = trip.data.notes ?? ""
         via = trip.data.addedVia ?? "manual"
+        extras = trip.extras
     }
 
     /// Why it can't be saved yet, in plain words; nil when it can.
@@ -180,7 +186,7 @@ struct TripDraft: Equatable {
     }
 
     /// Fields for `POST /v1/trips` (`isNew`) or `PATCH /v1/trips/{id}`: a PATCH never sends addedVia/addedAt.
-    func fields(isNew: Bool, stamp: String = Fmt.stamp()) -> [String: JSONValue] {
+    func fields(isNew: Bool, stamp: String = Fmt.stamp(), sendExtras: Bool = false) -> [String: JSONValue] {
         func text(_ value: String, _ cap: Int) -> JSONValue {
             let clean = value.trimmed.capped(cap)
             return clean.isEmpty ? .null : .string(clean)
@@ -203,6 +209,10 @@ struct TripDraft: Equatable {
             "notes": text(notes, 500),
         ]
         if let day = sailDate { f["sailDate"] = .string(Fmt.isoDay(day)) }
+        if sendExtras {
+            let kept = extras.filter { !$0.name.trimmed.isEmpty }.prefix(8)
+            f["extras"] = .array(kept.map { $0.json })
+        }
         if isNew {
             f["addedVia"] = .string(via == "catalog" ? "catalog" : "manual")
             f["addedAt"] = .string(stamp)

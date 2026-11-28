@@ -39,6 +39,19 @@ private struct DealDetailContent: View {
 
     private var d: DealData { deal.data }
 
+    /// The server's sheet, shown only when the server lists `sheet` and the deal is one sailing.
+    private var shownSheet: DealSheet? {
+        guard store.has(.sheet), deal.kind != .sale else { return nil }
+        return deal.sheet
+    }
+
+    /// Every ship of this deal's class (Jim: never "+ N more").
+    private var classGroup: ShipClassGroup? {
+        guard deal.kind != .sale else { return nil }
+        return store.catalog.classGroup(line: deal.line, ship: d.ship)
+            ?? store.catalog.classGroup(line: deal.line, classKey: d.shipClass)
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             List {
@@ -49,9 +62,17 @@ private struct DealDetailContent: View {
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                 .listRowSeparator(.hidden)
 
+                if let sheet = shownSheet {
+                    // v5: the trip cost for the party and the verdict lead (CONTRACT_V5 section 2.8).
+                    DealSheetSections(sheet: sheet, line: deal.line, part: .cost, priceScore: d.score,
+                                      priceLabel: d.scoreLabel)
+                }
                 scoopSection
                 if let feedback, feedback.verdict != nil {
                     answerSection(feedback)
+                }
+                if let sheet = shownSheet {
+                    DealSheetSections(sheet: sheet, line: deal.line, part: .more)
                 }
                 if deal.kind == .sale {
                     offersSection
@@ -113,6 +134,7 @@ private struct DealDetailContent: View {
                 AnswerSheet(deal: deal, verdict: verdict, existing: feedback)
             }
             .task(id: deal.id) {
+                await store.loadShipPhotos()
                 await store.loadHistory(deal.id)
             }
             .onAppear {
@@ -228,7 +250,7 @@ private struct DealDetailContent: View {
                     .id(DetailFocus.price)
             }
             if let total = d.totalFor3 {
-                InfoRow(label: "For 3", value: Fmt.usd(total), note: d.totalAssumes)
+                InfoRow(label: "For the party", value: Fmt.usd(total), note: d.totalAssumes)
             }
             if let pp = d.pricePP, pp > 0 {
                 InfoRow(label: "Per person", value: Fmt.usd(pp), note: taxesNote)
@@ -368,7 +390,9 @@ private struct DealDetailContent: View {
     private var itinerarySection: some View {
         Section("Itinerary") {
             if let dates = deal.dates {
-                InfoRow(label: "Dates", value: dates, note: d.nights.map { Fmt.nights($0) })
+                InfoRow(label: "Dates", value: dates,
+                        note: [d.nights.map { Fmt.nights($0) }, shownSheet?.itinerary?.text].compactMap { $0 }
+                            .joined(separator: " · "))
                     .id(DetailFocus.itinerary)
             }
             if let port = d.port, !port.isEmpty {
@@ -399,8 +423,13 @@ private struct DealDetailContent: View {
             } else if let size = deal.sizeTitle {
                 InfoRow(label: "Ship size", value: size)
             }
-            if let classTitle = deal.classTitle, deal.shipClass != .other {
+            if let group = classGroup {
+                ClassShipsRow(group: group, current: d.ship)
+            } else if let classTitle = deal.classTitle, deal.shipClass != .other {
                 InfoRow(label: "Ship class", value: classTitle)
+            }
+            if deal.kind != .sale, let ship = d.ship, ShipScaleStrip.available(store, line: deal.line, ship: ship) {
+                ShipScaleStrip(line: deal.line, ship: ship)
             }
         }
     }
@@ -562,8 +591,10 @@ private struct DealDetailContent: View {
         var parts = [deal.title]
         if !deal.datesLine.isEmpty { parts.append(deal.datesLine) }
         if let route = deal.route { parts.append(route) }
-        if let total = d.totalFor3 {
-            parts.append("\(Fmt.usd(total)) for 3")
+        if let low = deal.sheet?.total?.low, store.has(.sheet) {
+            parts.append("trip about \(Money.range(low, deal.sheet?.total?.high) ?? Fmt.usd(low)) \(deal.sheet?.partyText ?? PartyText.unit)")
+        } else if let total = d.totalFor3 {
+            parts.append("\(Fmt.usd(total)) \(PartyText.unit)")
         } else if let pp = d.pricePP, pp > 0 {
             parts.append("\(Fmt.usd(pp)) pp")
         }

@@ -178,7 +178,7 @@ struct APIClient {
     // MARK: Transport
 
     private func call(_ method: String, _ path: String, query: [URLQueryItem] = [], body: JSONValue? = nil,
-                      authorized: Bool = true) async throws -> Data {
+                      authorized: Bool = true, accept: String = "application/json") async throws -> Data {
         guard var components = URLComponents(string: base + path) else { throw APIError.notConfigured }
         if !query.isEmpty {
             components.queryItems = query
@@ -189,7 +189,7 @@ struct APIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(accept, forHTTPHeaderField: "Accept")
         if authorized { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body {
             request.httpBody = try JSONEncoder().encode(body)
@@ -233,5 +233,56 @@ struct APIClient {
             if !text.isEmpty { return text.capped(200) }
         }
         return String(decoding: data.prefix(160), as: UTF8.self)
+    }
+}
+
+
+// MARK: - v5 endpoints (CONTRACT_V5 section 6)
+
+extension APIClient {
+    /// `GET /v1/collect`
+    func collect() async throws -> CollectState {
+        let data = try await call("GET", "/v1/collect")
+        guard let value = try? JSONDecoder().decode(CollectState.self, from: data) else {
+            throw APIError.server("The collection state came back in a shape this version can't read.")
+        }
+        return value
+    }
+
+    /// `GET /v1/catalog/ports?q=&kind=&region=&limit=` (kind and region only for a v5 server).
+    func catalogPorts(q: String, kind: PortKind?, region: String?, limit: Int) async throws -> [CatalogPort] {
+        var query = [URLQueryItem(name: "limit", value: String(min(max(limit, 1), 50)))]
+        let text = q.trimmed.capped(40)
+        if !text.isEmpty { query.append(URLQueryItem(name: "q", value: text)) }
+        if let kind, kind != .any { query.append(URLQueryItem(name: "kind", value: kind.rawValue)) }
+        if let region, !region.isEmpty { query.append(URLQueryItem(name: "region", value: region)) }
+        let data = try await call("GET", "/v1/catalog/ports", query: query)
+        return CatalogPort.list(from: data)
+    }
+
+    /// `GET /v1/sheet?sailingId=&cabin=`
+    func sheet(sailingId: String, cabin: String?) async throws -> DealSheet? {
+        var query = [URLQueryItem(name: "sailingId", value: sailingId)]
+        if let cabin, CabinType(rawValue: cabin) != nil { query.append(URLQueryItem(name: "cabin", value: cabin)) }
+        let data = try await call("GET", "/v1/sheet", query: query)
+        return DealSheet.decodeResponse(data)
+    }
+
+    /// `GET /v1/reference/addons?line=`
+    func addonsGuide(line: String) async throws -> AddonsGuide? {
+        let data = try await call("GET", "/v1/reference/addons", query: [URLQueryItem(name: "line", value: line)])
+        return AddonsGuide.decodeResponse(data, line: line)
+    }
+
+    /// `GET /v1/ships/photos`: the photo manifest (empty when the server holds none).
+    func shipPhotos() async throws -> ShipPhotoManifest {
+        let data = try await call("GET", "/v1/ships/photos")
+        return ShipPhotoManifest.decode(data)
+    }
+
+    /// The raw bytes at a path on the deal server (a ship photo), with the app token.
+    func raw(_ path: String) async throws -> Data {
+        guard path.hasPrefix("/") else { throw APIError.notConfigured }
+        return try await call("GET", path, accept: "image/jpeg, image/*")
     }
 }

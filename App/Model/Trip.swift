@@ -50,6 +50,12 @@ struct TripPrefs: Decodable, Equatable {
     var portRecencyMonths: Int? = nil
     var portRecencyFadeMonths: Int? = nil
     var usePortRatings: Bool? = nil
+    // v5 (CONTRACT_V5 section 2.1). Edited in Settings > Trip cost and sent only when the server lists `sheet`;
+    // My Trip's own save never sends them, so a PATCH leaves the server's values alone.
+    var buyKinds: [String]? = nil
+    var groundPorts: [String]? = nil
+    var hotelNightBefore: Bool? = nil
+    var budgetBasis: String? = nil
 
     /// Balcony kinds My Trip can rule out (the ids the server stores, and how they read).
     static let balconyKinds: [(id: String, title: String)] = [
@@ -63,6 +69,7 @@ struct TripPrefs: Decodable, Equatable {
         case alertForMyTrip, alertMustSee, quietHoursStart, quietHoursEnd, notes, updatedAt
         case lines, shipSizes, dealTypes, minPctUnder, minScore, sailMonths, refreshMinutes
         case bookingPreference, portRecencyMonths, portRecencyFadeMonths, usePortRatings
+        case buyKinds, groundPorts, hotelNightBefore, budgetBasis
     }
 
     init() {}
@@ -115,6 +122,10 @@ struct TripPrefs: Decodable, Equatable {
         portRecencyMonths = maybe(.portRecencyMonths, Int.self)
         portRecencyFadeMonths = maybe(.portRecencyFadeMonths, Int.self)
         usePortRatings = maybe(.usePortRatings, Bool.self)
+        buyKinds = maybe(.buyKinds, [String].self)
+        groundPorts = maybe(.groundPorts, [String].self)
+        hotelNightBefore = maybe(.hotelNightBefore, Bool.self)
+        budgetBasis = maybe(.budgetBasis, String.self)
     }
 
     /// Ports visited within this many months count a little less (0 turns it off); the server's default is 6.
@@ -133,13 +144,14 @@ struct TripPrefs: Decodable, Equatable {
         effectiveLines.isEmpty || effectiveLines.contains { CruiseLine.same($0, CruiseLine.royal) }
     }
 
-    /// "Royal Caribbean", "Royal Caribbean & Celebrity", "Royal Caribbean +2" or "Any line".
+    /// "Royal Caribbean", "Royal Caribbean & Celebrity", "Royal Caribbean, Celebrity and Disney" or "Any line".
+    /// Every line is named; never "+ N more".
     var linesSummary: String {
         let chosen = effectiveLines
         if chosen.isEmpty { return "Any line" }
         if chosen.count == 1 { return chosen[0] }
         if chosen.count == 2 { return "\(chosen[0]) & \(chosen[1])" }
-        return "\(chosen[0]) +\(chosen.count - 1)"
+        return ListText.join(chosen)
     }
 
     /// The same settings, trimmed to what the server accepts (schema caps, nightsMin <= nightsMax, dateFrom <=
@@ -657,8 +669,7 @@ struct DealFilters: Codable, Equatable {
             guard let c = d.cabin, cabinTypes.contains(c) else { return false }
         }
         if !places.isEmpty {
-            let mine = [d.port, d.region].compactMap { $0?.trimmed }.filter { !$0.isEmpty }
-            guard mine.contains(where: { place in places.contains(place) }) else { return false }
+            guard places.contains(where: { PlaceMatch.matches($0, port: d.port, region: d.region) }) else { return false }
         }
         if !months.isEmpty {
             guard let sail = d.sailDate, months.contains(String(sail.prefix(7))) else { return false }

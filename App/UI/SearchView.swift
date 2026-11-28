@@ -7,7 +7,7 @@ import SwiftUI
 struct SearchView: View {
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
-    @State private var query = SearchMemory.load()
+    @State private var query: SearchQuery
     @State private var rows: [SearchRow] = []
     @State private var result: SearchResult?
     @State private var loading = false
@@ -18,6 +18,12 @@ struct SearchView: View {
     @State private var activePlan: String?
     @State private var message: String?
     @State private var dealShown: String?
+    /// v5: a row opened as its sheet.
+    @State private var rowShown: SearchRow?
+
+    init(initialQuery: SearchQuery? = nil) {
+        _query = State(initialValue: initialQuery ?? SearchMemory.load())
+    }
 
     var body: some View {
         NavigationStack {
@@ -62,6 +68,9 @@ struct SearchView: View {
             .navigationDestination(item: $dealShown) { id in
                 DealDetailView(dealId: id)
             }
+            .navigationDestination(item: $rowShown) { row in
+                SailingSheetScreen(row: row, cabin: query.cabin, savePlan: savePlanAction)
+            }
             .sheet(isPresented: $editingFilters) {
                 SearchFiltersSheet(query: $query)
             }
@@ -83,6 +92,13 @@ struct SearchView: View {
                 Text(message ?? "")
             }
         }
+    }
+
+    /// From an opened row: save the search that found it as a plan.
+    private var savePlanAction: (() -> Void)? {
+        guard store.has(.plans) else { return nil }
+        let current = query
+        return { planEditor = .new(current) }
     }
 
     private var promotingShown: Binding<Bool> {
@@ -135,6 +151,7 @@ struct SearchView: View {
 
     private var filtersSection: some View {
         Section {
+            DefaultLinesBanner()
             Button {
                 editingFilters = true
             } label: {
@@ -173,6 +190,18 @@ struct SearchView: View {
 
     // MARK: Results
 
+    /// Rows of a known region first; with a region filter, rows whose region is not known sit under their own
+    /// header after them (CONTRACT_V5 section 1.6).
+    private var splitsUnknownRegion: Bool { store.has(.catalog5) && !query.regions.isEmpty }
+    private var knownRows: [SearchRow] { splitsUnknownRegion ? rows.filter { !$0.regionUnknown } : rows }
+    private var unknownRegionRows: [SearchRow] { splitsUnknownRegion ? rows.filter { $0.regionUnknown } : [] }
+
+    private func rowView(_ row: SearchRow) -> some View {
+        SearchRowView(row: row, book: store.bookChoice(for: row), hasDeal: row.dealId.flatMap { store.deal($0) } != nil,
+                      tracked: isTracked(row), track: { track(row) }, openDeal: { dealShown = row.dealId },
+                      open: { rowShown = row })
+    }
+
     @ViewBuilder
     private var resultsSection: some View {
         Section {
@@ -188,15 +217,18 @@ struct SearchView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else if rows.isEmpty {
-                Text("No sailings match. A fact Deal Desk doesn't know never hides a sailing, so try fewer filters.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                if let result, result.hasExplanation {
+                    EmptySearchExplained(result: result)
+                } else {
+                    Text("No sailings match. A fact Deal Desk doesn't know never hides a sailing, so try fewer filters.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
-            ForEach(rows) { row in
-                SearchRowView(row: row, book: store.bookChoice(for: row), hasDeal: row.dealId.flatMap { store.deal($0) } != nil,
-                              tracked: isTracked(row), track: { track(row) }, openDeal: { dealShown = row.dealId })
+            ForEach(knownRows) { row in
+                rowView(row)
             }
-            if result?.nextOffset != nil {
+            if result?.nextOffset != nil && unknownRegionRows.isEmpty {
                 Button {
                     Task { await run(reset: false) }
                 } label: {
@@ -210,8 +242,32 @@ struct SearchView: View {
         } header: {
             Text(countLine)
         } footer: {
-            if !footerLines.isEmpty {
+            if !footerLines.isEmpty && unknownRegionRows.isEmpty {
                 Text(footerLines.joined(separator: "\n"))
+            }
+        }
+        if !unknownRegionRows.isEmpty {
+            Section {
+                ForEach(unknownRegionRows) { row in
+                    rowView(row)
+                }
+                if result?.nextOffset != nil {
+                    Button {
+                        Task { await run(reset: false) }
+                    } label: {
+                        HStack {
+                            Text("Show more")
+                            if loading { Spacer(); ProgressView() }
+                        }
+                    }
+                    .disabled(loading)
+                }
+            } header: {
+                Text("Region not known (\(unknownRegionRows.count))")
+            } footer: {
+                if !footerLines.isEmpty {
+                    Text(footerLines.joined(separator: "\n"))
+                }
             }
         }
     }
@@ -371,30 +427,49 @@ struct SearchRowView: View {
     let tracked: Bool
     let track: () -> Void
     var openDeal: () -> Void = {}
+    /// v5: opens the row as its sheet (trip cost, verdict); nil keeps the v4 row.
+    var open: (() -> Void)? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(row.eyebrow)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    Text(row.shipTitle)
-                        .font(.headline)
-                    if !row.datesLine.isEmpty {
-                        Text(row.datesLine)
-                            .font(.subheadline)
-                            .monospacedDigit()
-                            .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
-                            .minimumScaleFactor(0.85)
+            Button {
+                open?()
+            } label: {
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(row.eyebrow)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text(row.shipTitle)
+                                .font(.headline)
+                                .foregroundStyle(Color.primary)
+                            if open != nil {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        if !row.datesLine.isEmpty {
+                            Text(row.datesLine)
+                                .font(.subheadline)
+                                .foregroundStyle(Color.primary)
+                                .monospacedDigit()
+                                .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                                .minimumScaleFactor(0.85)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    if let score = row.score {
+                        ScoreRing(score: score, label: row.scoreLabel)
                     }
                 }
-                Spacer(minLength: 8)
-                if let score = row.score {
-                    ScoreRing(score: score, label: row.scoreLabel)
-                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .disabled(open == nil)
+            .accessibilityHint(Text(open == nil ? "" : "Opens the trip cost and details"))
             if let route = row.route {
                 Text(route)
                     .font(.subheadline)
@@ -402,6 +477,9 @@ struct SearchRowView: View {
                     .lineLimit(typeSize.isAccessibilitySize ? 4 : 2)
             }
             priceLine
+            if let cost = row.tripCost {
+                TripCostLine(cost: cost)
+            }
             if !row.typeChips.isEmpty {
                 FlowLayout(spacing: 6) {
                     ForEach(row.typeChips, id: \.self) { chip in
@@ -455,6 +533,10 @@ struct SearchRowView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
+        } else if row.scheduleOnly {
+            Text("Price not seen · a schedule lists this sailing")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         } else {
             Text("No current price · \(row.cabinType?.title.lowercased() ?? "any cabin")")
                 .font(.subheadline)
@@ -520,6 +602,16 @@ struct SearchFiltersForm: View {
         CruiseLine.choosable(store.catalog).map { ReasonOption(id: $0, title: $0) }
     }
 
+    private var pickers: Bool { store.has(.catalog5) }
+
+    private func listBinding(_ path: WritableKeyPath<SearchQuery, [String]>) -> Binding<[String]> {
+        Binding(get: { draft[keyPath: path] }, set: { draft[keyPath: path] = $0 })
+    }
+
+    private func chosenText(_ items: [String], none: String) -> String {
+        items.isEmpty ? none : ListText.join(items)
+    }
+
     private var shipOptions: [ReasonOption] {
         var out: [ReasonOption] = []
         for line in draft.lines {
@@ -534,11 +626,18 @@ struct SearchFiltersForm: View {
     var body: some View {
         Form {
             Section {
-                ChipPicker(options: lineOptions, selection: set(\.lines))
+                if pickers {
+                    PickerLink(label: "Lines", value: chosenText(draft.lines, none: "Any line")) {
+                        LinesPickerScreen(selection: listBinding(\.lines))
+                    }
+                } else {
+                    ChipPicker(options: lineOptions, selection: set(\.lines))
+                }
             } header: {
                 Text("Lines")
             } footer: {
-                Text("None picked means every line.")
+                Text(pickers ? "Every line is offered, with what Deal Desk can see for it. None picked means every line."
+                             : "None picked means every line.")
             }
             Section {
                 ChipPicker(options: ShipSize.allCases.map { ReasonOption(id: $0.rawValue, title: $0.title) },
@@ -551,15 +650,34 @@ struct SearchFiltersForm: View {
             } footer: {
                 Text(draft.lines.isEmpty ? "Pick a line to choose its ships." : "A ship whose size isn't known still shows.")
             }
-            Section("Leaving from") {
-                TextField("Ports, e.g. Galveston, Miami", text: $portsText)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-                    .onChange(of: portsText) { _, text in draft.ports = SearchFiltersForm.split(text) }
-                TextField("Regions, e.g. Western Caribbean", text: $regionsText)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-                    .onChange(of: regionsText) { _, text in draft.regions = SearchFiltersForm.split(text) }
+            if pickers {
+                Section {
+                    PickerLink(label: "Leaving from", value: chosenText(draft.ports, none: "Any port")) {
+                        PortPickerScreen(title: "Leaving from", kind: .embark, selection: listBinding(\.ports))
+                    }
+                    PickerLink(label: "Visits", value: chosenText(draft.calls, none: "Any port of call")) {
+                        PortPickerScreen(title: "Visits", kind: .call, selection: listBinding(\.calls),
+                                         footer: "Sailings that stop at any of these (scenic cruising like Glacier Bay counts).")
+                    }
+                    PickerLink(label: "Region", value: chosenText(draft.regions, none: "Anywhere")) {
+                        RegionPickerScreen(selection: listBinding(\.regions))
+                    }
+                } header: {
+                    Text("Where")
+                } footer: {
+                    Text("A sailing whose region isn't known is listed last, under its own heading.")
+                }
+            } else {
+                Section("Leaving from") {
+                    TextField("Ports, separated by commas", text: $portsText)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                        .onChange(of: portsText) { _, text in draft.ports = SearchFiltersForm.split(text) }
+                    TextField("Regions, separated by commas", text: $regionsText)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                        .onChange(of: regionsText) { _, text in draft.regions = SearchFiltersForm.split(text) }
+                }
             }
             datesSection
             nightsSection
@@ -672,6 +790,94 @@ struct SearchFiltersForm: View {
 
     private func nightsBinding(_ path: WritableKeyPath<SearchQuery, Int?>, _ fallback: Int) -> Binding<Int> {
         Binding(get: { draft[keyPath: path] ?? fallback }, set: { draft[keyPath: path] = $0 })
+    }
+}
+
+// MARK: - An empty search explains itself (CONTRACT_V5 section 1.6)
+
+/// Why nothing matched, in the server's words; the funnel as a short list ("Disney 289 → Alaska 0"); and the one
+/// thing to do about it: start collecting the line, or open the line's own site.
+struct EmptySearchExplained: View {
+    let result: SearchResult
+    @EnvironmentObject private var store: Store
+    @Environment(\.openURL) private var openURL
+    @State private var started: Set<String> = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Nothing matches")
+                .font(.headline)
+            ForEach(Array(lines.enumerated()), id: \.offset) { item in
+                Text(item.element)
+                    .font(.subheadline)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !result.funnel.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Where the sailings went")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(Array(result.funnel.prefix(12).enumerated()), id: \.offset) { item in
+                        HStack(spacing: 6) {
+                            Image(systemName: item.offset == 0 ? "circle" : "arrow.turn.down.right")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Text(item.element.text)
+                                .font(.footnote)
+                                .monospacedDigit()
+                                .foregroundStyle((item.element.remaining ?? 1) == 0 ? Palette.call : Color.secondary)
+                        }
+                        .padding(.leading, CGFloat(min(item.offset, 6)) * 6)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+            ForEach(actions, id: \.self) { gap in
+                actionButton(gap)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// `why` first; else each gap's note (or its reason in words).
+    private var lines: [String] {
+        if !result.whyLines.isEmpty { return result.whyLines }
+        let notes = result.coverageGap.map { gap -> String in
+            if let note = gap.note?.trimmed, !note.isEmpty { return note }
+            return gap.reasonText
+        }
+        return notes.isEmpty ? ["A fact Deal Desk doesn't know never hides a sailing, so try fewer filters."] : notes
+    }
+
+    private var actions: [CoverageGap] {
+        result.coverageGap.filter { $0.action == "collect_line" || $0.action == "open_line" }
+    }
+
+    @ViewBuilder
+    private func actionButton(_ gap: CoverageGap) -> some View {
+        let line = gap.lineName
+        if gap.action == "collect_line" {
+            if store.has(.collect) {
+                let done = started.contains(line) || store.collectPrefs.has(line)
+                Button {
+                    if store.startCollecting(line) { started.insert(line) }
+                } label: {
+                    Label(done ? "Collecting \(line): first results in about a day" : "Start collecting \(line)",
+                          systemImage: done ? "checkmark.circle" : "plus.circle")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .disabled(done)
+            }
+        } else if let home = store.catalog.line(line)?.booking?.home, let url = Fmt.webURL(home) {
+            Button {
+                openURL(url)
+            } label: {
+                Label("Open \(store.catalog.line(line)?.booking?.short ?? line)'s own site", systemImage: "safari")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+        }
     }
 }
 

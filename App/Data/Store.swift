@@ -176,6 +176,13 @@ final class Store: ObservableObject {
     /// The server's per-port summary of those trips (ratings, visits, how they nudge picks).
     @Published private(set) var ports: PortsSummary?
     @Published private(set) var featuresOff: Set<String> = []
+    // v5
+    /// `prefs/collect`: the lines Deal Desk collects prices for (CONTRACT_V5 section 1.2).
+    @Published private(set) var collectPrefs = CollectPrefs()
+    /// `GET /v1/collect`, loaded when My Lines opens.
+    @Published fileprivate(set) var collectState: CollectState?
+    /// `GET /v1/ships/photos`, loaded once per session when a screen with a ship on it opens.
+    @Published fileprivate(set) var shipManifest: ShipPhotoManifest?
 
     private var dealIndex: [String: Deal] = [:]
     private var cache: CacheFile
@@ -469,8 +476,11 @@ final class Store: ObservableObject {
 
     /// `GET /v1/search`. A 404 or 405 means this server has no search after all: the feature turns off.
     func search(_ query: SearchQuery, offset: Int = 0) async throws -> SearchResult {
-        if isPreview { return Samples.searchResult }
+        if isPreview { return Samples.previewSearch(query, catalog: catalog) }
         guard let client = Connection.client() else { throw APIError.notConfigured }
+        // `calls` is a v5 parameter; an older server never gets it.
+        var query = query
+        if !has(.catalog5) { query.calls = [] }
         do {
             return try await client.search(query, offset: offset)
         } catch APIError.notFound {
@@ -556,15 +566,15 @@ final class Store: ObservableObject {
             return editing == nil ? .already(clash.id) : .invalid("That sailing is already logged.")
         }
         if let editing {
-            if !replaceQueuedCreate("trips", editing.id, with: draft.fields(isNew: true)) {
-                enqueue(.upsert, "trips", editing.id, draft.fields(isNew: false))
+            if !replaceQueuedCreate("trips", editing.id, with: draft.fields(isNew: true, sendExtras: has(.reference))) {
+                enqueue(.upsert, "trips", editing.id, draft.fields(isNew: false, sendExtras: has(.reference)))
             }
             Haptics.success()
             return .saved(editing.id)
         }
         guard trips.count < Store.tripsLimit else { return .full }
         let id = Store.newId(prefix: "local")
-        enqueue(.create, "trips", id, draft.fields(isNew: true))
+        enqueue(.create, "trips", id, draft.fields(isNew: true, sendExtras: has(.reference)))
         Haptics.success()
         return .saved(id)
     }
@@ -592,6 +602,9 @@ final class Store: ObservableObject {
         return patchTrip(["portRecencyMonths": .int(months), "portRecencyFadeMonths": .int(fade),
                           "usePortRatings": .bool(useRatings)])
     }
+
+    /// v5 settings use the same path: a few fields on the trip settings that already exist.
+    fileprivate func patchTripFields(_ fields: [String: JSONValue]) -> Bool { patchTrip(fields) }
 
     /// Changes a few fields on the trip settings that already exist (never creates them).
     private func patchTrip(_ fields: [String: JSONValue]) -> Bool {
@@ -1204,6 +1217,8 @@ final class Store: ObservableObject {
             .sorted { ($0.asked, $0.id) < ($1.asked, $1.id) }
 
         trip = colls["prefs"]?["trip"].flatMap { $0.data.decode(TripPrefs.self) }
+        collectPrefs = colls["prefs"]?["collect"].flatMap { CollectPrefs(raw: $0) } ?? CollectPrefs()
+        PartyText.current = trip.map { (adults: $0.adults, children: $0.children) }
 
         let localIds = Set(queue.filter { $0.op == .create }.map { $0.docId })
         tracked = (colls["tracked"] ?? [:]).values
@@ -1230,5 +1245,184 @@ final class Store: ObservableObject {
         Task {
             try? await UNUserNotificationCenter.current().setBadgeCount(count)
         }
+    }
+}
+
+
+// MARK: - v5 (CONTRACT_V5): pickers, collection, the sheet, reference data, ship photos
+
+extension Store {
+    /// A v5 part is on: the server says apiVersion 5+ and lists it, and its calls have not answered 404/405.
+    func has(_ feature: V5Feature) -> Bool {
+        isV3 && catalog.has(feature) && !featuresOff.contains(feature.rawValue)
+    }
+
+    private func turnOff(_ feature: V5Feature) {
+        featuresOff.insert(feature.rawValue)
+        cache.featuresOff = Array(featuresOff).sorted()
+        saveCache()
+    }
+
+    /// The For-my-trip line filter is the never-saved default (Royal Caribbean only), so the screens say so.
+    var showsDefaultLinesBanner: Bool {
+        guard has(.catalog5) || has(.collect) else { return false }
+        if let state = collectState?.linesState ?? catalog.linesState, !state.isLegacyDefault { return false }
+        return trip?.lines == nil
+    }
+
+    /// The region tree from the catalog (empty before v5).
+    var regionTree: [RegionNode] {
+        has(.catalog5) ? catalog.regionTree : []
+    }
+
+    // MARK: Collection
+
+    /// `GET /v1/collect`: what Deal Desk collects for each line, and why.
+    func loadCollect() async {
+        guard has(.collect) else { return }
+        if isPreview {
+            collectState = Samples.collectState
+            return
+        }
+        guard let client = Connection.client() else { return }
+        do {
+            collectState = try await client.collect()
+        } catch APIError.notFound {
+            turnOff(.collect)
+        } catch APIError.unsupported {
+            turnOff(.collect)
+        } catch {
+            return
+        }
+    }
+
+    /// Saves `prefs/collect` (Collect prices for) the moment it changes.
+    func saveCollect(_ prefs: CollectPrefs) {
+        guard has(.collect) else { return }
+        let fields = prefs.fields()
+        if let index = queue.lastIndex(where: { $0.op == .upsert && $0.coll == "prefs" && $0.docId == "collect" }) {
+            for (key, value) in fields { queue[index].fields[key] = value }
+            saveQueue()
+            rebuild()
+            kick()
+        } else {
+            enqueue(.upsert, "prefs", "collect", fields)
+        }
+        Haptics.tap()
+    }
+
+    /// "Start collecting Disney": adds the line to Collect prices for.
+    @discardableResult
+    func startCollecting(_ line: String) -> Bool {
+        guard has(.collect), !line.trimmed.isEmpty else { return false }
+        var prefs = collectPrefs
+        guard !prefs.has(line) else { return true }
+        guard prefs.lines.count < 12 else { return false }
+        prefs.lines.append(CruiseLine.resolved(line))
+        saveCollect(prefs)
+        Task { await loadCollect() }
+        return true
+    }
+
+    // MARK: Catalog pickers
+
+    /// `GET /v1/catalog/ports`: search-as-you-type over the catalog's ports.
+    func catalogPorts(matching text: String, kind: PortKind, region: String? = nil, limit: Int = 50) async -> [CatalogPort] {
+        if isPreview { return Samples.ports(matching: text, kind: kind) }
+        guard let client = Connection.client() else { return [] }
+        return (try? await client.catalogPorts(q: text, kind: has(.catalog5) ? kind : nil, region: region,
+                                               limit: limit)) ?? []
+    }
+
+    // MARK: The sheet
+
+    /// `GET /v1/sheet`: the trip cost and verdict for any sailing Deal Desk has seen.
+    func sheet(sailingId: String, cabin: String?) async -> DealSheet? {
+        guard has(.sheet), !sailingId.isEmpty else { return nil }
+        if isPreview { return Samples.sheet }
+        guard let client = Connection.client() else { return nil }
+        do {
+            return try await client.sheet(sailingId: sailingId, cabin: cabin)
+        } catch APIError.unsupported {
+            turnOff(.sheet)
+            return nil
+        } catch {
+            return nil
+        }
+    }
+
+    /// Settings > Trip cost: what we usually buy, ports we drive to, the hotel night, what the budget counts.
+    @discardableResult
+    func saveTripCost(buyKinds: [String], groundPorts: [String], hotelNightBefore: Bool, budgetBasis: String) -> Bool {
+        guard has(.sheet) else { return false }
+        let kinds = buyKinds.filter { AddonKind.all.contains($0) }
+        var ports: [String] = []
+        for port in groundPorts {
+            let clean = port.trimmed.capped(40)
+            if !clean.isEmpty, !ports.contains(clean) { ports.append(clean) }
+        }
+        return patchTripFields([
+            "buyKinds": .array(Array(kinds.prefix(10)).map { JSONValue.string($0) }),
+            "groundPorts": .array(Array(ports.prefix(10)).map { JSONValue.string($0) }),
+            "hotelNightBefore": .bool(hotelNightBefore),
+            "budgetBasis": .string(budgetBasis == "trip" ? "trip" : "cabin"),
+        ])
+    }
+
+    // MARK: Reference
+
+    /// `GET /v1/reference/addons?line=`: what to buy on a line.
+    func addonsGuide(line: String) async -> AddonsGuide? {
+        guard has(.reference) else { return nil }
+        if isPreview { return Samples.addonsGuide }
+        guard let client = Connection.client() else { return nil }
+        do {
+            return try await client.addonsGuide(line: line)
+        } catch APIError.unsupported {
+            turnOff(.reference)
+            return nil
+        } catch {
+            return nil
+        }
+    }
+
+    // MARK: Ship photos
+
+    /// `GET /v1/ships/photos`: the side-on photos the deal server holds (empty when it has none).
+    func shipPhotos() async -> ShipPhotoManifest {
+        if let manifest = shipManifest { return manifest }
+        if isPreview {
+            shipManifest = Samples.shipPhotos
+            return Samples.shipPhotos
+        }
+        guard catalog.isV5, let client = Connection.client() else { return ShipPhotoManifest() }
+        do {
+            let manifest = try await client.shipPhotos()
+            shipManifest = manifest
+            return manifest
+        } catch APIError.notFound {
+            shipManifest = ShipPhotoManifest()
+            return ShipPhotoManifest()
+        } catch {
+            return ShipPhotoManifest()
+        }
+    }
+
+    /// Loads the photo manifest once, so the to-scale strips can show without a wait of their own.
+    func loadShipPhotos() async {
+        guard shipManifest == nil else { return }
+        _ = await shipPhotos()
+    }
+
+    /// The bytes of one photo (the app token goes with the request).
+    func shipPhotoData(_ photo: ShipPhoto) async -> Data? {
+        guard !isPreview, let path = photo.path, let client = Connection.client() else { return nil }
+        return try? await client.raw(path)
+    }
+
+    /// The ship Jim sailed most recently (from My trips): the yardstick on the ship-size screens.
+    var yardstick: ShipRef? {
+        guard let trip = trips.first(where: { !$0.ship.isEmpty && $0.data.ship != nil }) else { return nil }
+        return ShipRef(line: trip.line, name: trip.ship)
     }
 }

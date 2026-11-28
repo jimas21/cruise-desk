@@ -35,12 +35,8 @@ struct TripEditor: View {
     /// Not set up yet and nothing changed: Save stays off, so the starting values never replace the real rules.
     private var untouchedStart: Bool { isNew && draft == start && ages == startAges }
 
-    /// Homeports the line sails from (public, not anyone's trip); the deals' own ports are added to these.
-    private static let commonPorts = ["Seattle", "Vancouver", "Los Angeles", "San Diego", "Galveston", "New Orleans",
-                                      "Miami", "Fort Lauderdale", "Port Canaveral", "Tampa", "Cape Liberty",
-                                      "Baltimore", "Boston", "San Juan"]
-    private static let commonRegions = ["Caribbean", "Bahamas", "Mexico", "Alaska", "Hawaii", "Pacific Coast",
-                                        "Bermuda", "Canada & New England", "Europe", "Asia", "Australia"]
+    /// v5: ports and regions come from the catalog pickers, never a hand-kept list (CONTRACT_V5 section 1.7).
+    private var pickers: Bool { store.has(.catalog5) }
 
     private var classIds: [String] { ShipClass.allCases.map { $0.rawValue } }
     private var classOptions: [ReasonOption] {
@@ -59,11 +55,16 @@ struct TripEditor: View {
     }
 
     private var portIds: [String] {
-        names(TripEditor.commonPorts, store.deals.map { $0.data.port }, draft.portsPreferred, draft.portsExcluded)
+        names([], store.deals.map { $0.data.port }, draft.portsPreferred, draft.portsExcluded)
     }
 
     private var regionIds: [String] {
-        names(TripEditor.commonRegions, store.deals.map { $0.data.region }, draft.regions)
+        names([], store.deals.map { $0.data.region }, draft.regions)
+    }
+
+    private func listBinding(_ path: WritableKeyPath<TripPrefs, [String]>, most: Int) -> Binding<[String]> {
+        Binding(get: { draft[keyPath: path] },
+                set: { draft[keyPath: path] = Array($0.map { $0.trimmed.capped(30) }.filter { !$0.isEmpty }.prefix(most)) })
     }
 
     var body: some View {
@@ -176,8 +177,13 @@ struct TripEditor: View {
         }
     }
 
+    /// My Lines saves on every change once the trip settings exist (CONTRACT_V5 R1); a first-run form saves with
+    /// the rest, and a change there is enough to turn Save on.
     private var linesBinding: Binding<[String]> {
-        Binding(get: { draft.effectiveLines }, set: { draft.lines = $0 })
+        Binding(get: { draft.effectiveLines }, set: { lines in
+            draft.lines = lines
+            if !isNew && store.trip != nil { store.saveLines(lines) }
+        })
     }
 
     /// Royal Caribbean's own classes matter only while Royal Caribbean is one of the lines.
@@ -256,6 +262,19 @@ struct TripEditor: View {
             if showsRoyalClasses {
                 Section {
                     ChipPicker(options: classOptions, selection: chosen(\.shipClasses, order: classIds))
+                    let groups = store.catalog.classGroups(line: CruiseLine.royal)
+                    if !groups.isEmpty {
+                        DisclosureGroup("Ships in each class") {
+                            ForEach(groups) { group in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(group.title)
+                                        .font(.subheadline.weight(.semibold))
+                                    ClassShipsLine(group: group)
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
                 } header: {
                     Text(store.isV3 ? "Royal Caribbean classes" : "Ship classes")
                 } footer: {
@@ -364,7 +383,35 @@ struct TripEditor: View {
         }
     }
 
+    @ViewBuilder
     private var placesSection: some View {
+        if pickers {
+            Section {
+                PickerLink(label: "Favourite ports",
+                           value: draft.portsPreferred.isEmpty ? "None" : ListText.join(draft.portsPreferred)) {
+                    PortPickerScreen(title: "Favourite ports", kind: .embark,
+                                     selection: listBinding(\.portsPreferred, most: 20), most: 20,
+                                     footer: "Sailings from these rank first; others still count.")
+                }
+                PickerLink(label: "Ports to skip",
+                           value: draft.portsExcluded.isEmpty ? "None" : ListText.join(draft.portsExcluded)) {
+                    PortPickerScreen(title: "Ports to skip", kind: .any,
+                                     selection: listBinding(\.portsExcluded, most: 20), most: 20)
+                }
+                PickerLink(label: "Regions", value: draft.regions.isEmpty ? "Anywhere" : ListText.join(draft.regions)) {
+                    RegionPickerScreen(selection: listBinding(\.regions, most: 12))
+                }
+            } header: {
+                Text("Ports and regions")
+            } footer: {
+                Text("From Deal Desk's catalog of every line's ports. No region picked means anywhere.")
+            }
+        } else {
+            legacyPlacesSection
+        }
+    }
+
+    private var legacyPlacesSection: some View {
         Group {
             Section {
                 ChipPicker(options: portIds.map { ReasonOption(id: $0, title: $0) },

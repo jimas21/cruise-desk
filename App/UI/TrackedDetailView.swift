@@ -47,6 +47,10 @@ private struct TrackedDetailContent: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            if store.has(.sheet), let sheet = item.sheet {
+                // v5: the trip cost for the party and the verdict lead (CONTRACT_V5 section 2.8).
+                DealSheetSections(sheet: sheet, line: item.line)
+            }
             priceSection
             historySection
             coverageSection
@@ -75,6 +79,7 @@ private struct TrackedDetailContent: View {
         }
         .safeAreaInset(edge: .bottom) { bottomBar }
         .refreshable { await store.refresh(reason: .pull) }
+        .task { await store.loadShipPhotos() }
         .sheet(isPresented: $editing) {
             TrackedEditSheet(item: item)
         }
@@ -214,6 +219,12 @@ private struct TrackedDetailContent: View {
             InfoRow(label: "Line", value: item.line)
             if let size = item.size {
                 InfoRow(label: "Ship size", value: size.title, note: size.tonnage)
+            }
+            if let group = store.catalog.classGroup(line: item.line, ship: d.ship) {
+                ClassShipsRow(group: group, current: d.ship)
+            }
+            if let ship = d.ship, ShipScaleStrip.available(store, line: item.line, ship: ship) {
+                ShipScaleStrip(line: item.line, ship: ship)
             }
         }
     }

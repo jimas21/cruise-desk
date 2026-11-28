@@ -14,6 +14,13 @@ struct SettingsView: View {
     @State private var testing = false
     @State private var alerts: UNAuthorizationStatus = .notDetermined
 
+    /// "Drinks, Wi-Fi · cabin budget"
+    private var tripCostSummary: String {
+        let kinds = (store.trip?.buyKinds ?? []).map { AddonKind.title($0) }
+        let basis = store.trip?.budgetBasis == "trip" ? "whole-trip budget" : "cabin budget"
+        return kinds.isEmpty ? "nothing extra · \(basis)" : "\(ListText.join(kinds)) · \(basis)"
+    }
+
     var body: some View {
         Form {
             Section {
@@ -92,6 +99,20 @@ struct SettingsView: View {
                 } label: {
                     ValueLabel(label: "My Lines", value: store.isV3 ? (store.trip?.linesSummary ?? CruiseLine.royal)
                                                                    : "coming soon")
+                }
+                if store.has(.sheet) {
+                    NavigationLink {
+                        TripCostSettingsView()
+                    } label: {
+                        ValueLabel(label: "Trip cost", value: tripCostSummary)
+                    }
+                }
+                if store.catalog.isV5 {
+                    NavigationLink {
+                        ShipSizesView()
+                    } label: {
+                        Text("Ship sizes")
+                    }
                 }
             } header: {
                 Text("Lines and tracking")

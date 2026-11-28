@@ -62,6 +62,12 @@ struct DealsView: View {
                     .listRowInsets(EdgeInsets(top: 10, leading: CardList.gutter, bottom: 4, trailing: CardList.gutter))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
+                    if store.showsDefaultLinesBanner {
+                        DefaultLinesBanner()
+                            .listRowInsets(EdgeInsets(top: 2, leading: CardList.gutter + 4, bottom: 2, trailing: CardList.gutter))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                     if bucket == .trip {
                         TripSummaryRow(trip: store.trip) { showTrip = true }
                             .listRowInsets(EdgeInsets(top: 4, leading: CardList.gutter, bottom: 4, trailing: CardList.gutter))

@@ -237,6 +237,9 @@ struct TrackedCard: View {
             }
             TrackedPriceLine(item: item)
                 .padding(.top, 2)
+            if CatalogIndex.current.has(.sheet), let cost = item.sheet?.tripCost {
+                TripCostLine(cost: cost)
+            }
             trend
         }
         .modifier(CardFrame(on: framed))

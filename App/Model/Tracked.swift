@@ -197,6 +197,8 @@ struct TrackedSailing: Identifiable, Hashable {
     /// v4 fill: the line's own page for this sailing and any agency that is clearly better.
     var booking: BookingInfo? = nil
     var alternatives: [BookAlternative] = []
+    /// v5: the trip cost for the party and a verdict, filled by the server.
+    var sheet: DealSheet? = nil
 
     init?(raw: RawDoc, isLocal: Bool = false) {
         guard let decoded = raw.data.decode(TrackedData.self) else { return nil }
@@ -206,6 +208,7 @@ struct TrackedSailing: Identifiable, Hashable {
         self.isLocal = isLocal
         booking = BookingInfo.from(raw.data)
         alternatives = BookAlternative.from(raw.data)
+        sheet = DealSheet.from(raw.data)
     }
 
     init(id: String, data: TrackedData, booking: BookingInfo? = nil, alternatives: [BookAlternative] = []) {

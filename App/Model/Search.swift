@@ -62,8 +62,56 @@ struct SearchQuery: Codable, Equatable {
     var maxPP: Int? = nil
     var dealTypes: [String] = []
     var sort: String = SearchSort.deal.rawValue
+    /// v5: ports of call, any of them (CONTRACT_V5 section 1.6). Sent only to a v5 server; never part of a plan.
+    var calls: [String] = []
 
     var isEmpty: Bool { self.cleaned() == SearchQuery(sort: cleaned().sort) }
+
+    enum CodingKeys: String, CodingKey {
+        case lines, ships, sizes, ports, regions, dateFrom, dateTo, months, nightsMin, nightsMax, cabin, maxPP
+        case dealTypes, sort, calls
+    }
+
+    init(lines: [String] = [], ships: [String] = [], sizes: [String] = [], ports: [String] = [],
+         regions: [String] = [], dateFrom: String? = nil, dateTo: String? = nil, months: [Int] = [],
+         nightsMin: Int? = nil, nightsMax: Int? = nil, cabin: String? = nil, maxPP: Int? = nil,
+         dealTypes: [String] = [], sort: String = SearchSort.deal.rawValue, calls: [String] = []) {
+        self.lines = lines
+        self.ships = ships
+        self.sizes = sizes
+        self.ports = ports
+        self.regions = regions
+        self.dateFrom = dateFrom
+        self.dateTo = dateTo
+        self.months = months
+        self.nightsMin = nightsMin
+        self.nightsMax = nightsMax
+        self.cabin = cabin
+        self.maxPP = maxPP
+        self.dealTypes = dealTypes
+        self.sort = sort
+        self.calls = calls
+    }
+
+    /// A search saved by an older version (no `calls`) still opens.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        lines = c.lenient([String].self, .lines) ?? []
+        ships = c.lenient([String].self, .ships) ?? []
+        sizes = c.lenient([String].self, .sizes) ?? []
+        ports = c.lenient([String].self, .ports) ?? []
+        regions = c.lenient([String].self, .regions) ?? []
+        dateFrom = c.lenient(String.self, .dateFrom)
+        dateTo = c.lenient(String.self, .dateTo)
+        months = c.lenient([Int].self, .months) ?? []
+        nightsMin = c.lenient(Int.self, .nightsMin)
+        nightsMax = c.lenient(Int.self, .nightsMax)
+        cabin = c.lenient(String.self, .cabin)
+        maxPP = c.lenient(Int.self, .maxPP)
+        dealTypes = c.lenient([String].self, .dealTypes) ?? []
+        sort = c.lenient(String.self, .sort) ?? SearchSort.deal.rawValue
+        calls = c.lenient([String].self, .calls) ?? []
+    }
 
     /// Trimmed to what the server takes, so a search is never refused for its shape.
     func cleaned() -> SearchQuery {
@@ -83,6 +131,7 @@ struct SearchQuery: Codable, Equatable {
         q.sizes = list(sizes, 10, 4, allowed: ShipSize.allCases.map { $0.rawValue })
         q.ports = list(ports, 30, 10)
         q.regions = list(regions, 30, 12)
+        q.calls = list(calls, 30, 10)
         q.dateFrom = dateFrom.flatMap { Fmt.day($0) }.map { Fmt.isoDay($0) }
         q.dateTo = dateTo.flatMap { Fmt.day($0) }.map { Fmt.isoDay($0) }
         if let from = q.dateFrom, let to = q.dateTo, from > to { (q.dateFrom, q.dateTo) = (to, from) }
@@ -128,6 +177,7 @@ struct SearchQuery: Codable, Equatable {
         if let cabin = q.cabin { items.append(URLQueryItem(name: "cabin", value: cabin)) }
         if let maxPP = q.maxPP { items.append(URLQueryItem(name: "maxPP", value: String(maxPP))) }
         add("dealType", q.dealTypes)
+        add("calls", q.calls)
         items.append(URLQueryItem(name: "sort", value: q.sort))
         if offset > 0 { items.append(URLQueryItem(name: "offset", value: String(min(offset, 5000)))) }
         items.append(URLQueryItem(name: "limit", value: String(min(max(limit, 1), 100))))
@@ -138,12 +188,13 @@ struct SearchQuery: Codable, Equatable {
     var summary: String {
         let q = cleaned()
         var parts: [String] = []
-        if q.lines.count == 1 { parts.append(q.lines[0]) } else if q.lines.count > 1 { parts.append("\(q.lines[0]) +\(q.lines.count - 1)") }
+        if !q.lines.isEmpty { parts.append(ListText.join(q.lines)) }
         if !q.ships.isEmpty { parts.append(q.ships.count == 1 ? q.ships[0] : "\(q.ships.count) ships") }
         let sizes = ShipSize.allCases.filter { q.sizes.contains($0.rawValue) }
         if !sizes.isEmpty { parts.append(sizes.map { $0.title }.joined(separator: " · ")) }
         if !q.ports.isEmpty { parts.append("from \(q.ports.joined(separator: ", "))") }
         if !q.regions.isEmpty { parts.append(q.regions.joined(separator: ", ")) }
+        if !q.calls.isEmpty { parts.append("visits \(q.calls.joined(separator: " or "))") }
         if let from = Fmt.day(q.dateFrom), let to = Fmt.day(q.dateTo) {
             parts.append("\(Fmt.shortDay(from))–\(Fmt.shortDay(to))")
         } else if let from = Fmt.day(q.dateFrom) {
@@ -209,6 +260,10 @@ struct SearchRow: Decodable, Hashable, Identifiable {
     var booking: BookingInfo?
     var sources: [DealSource]?
     var bookAlternatives: [BookAlternative]?
+    // v5 (CONTRACT_V5 section 1.6)
+    var regionBasis: String?
+    var embarkKey: String?
+    var tripCost: TripCost?
 
     var id: String { "\(sailingId)|\(cabin ?? "")" }
 
@@ -217,6 +272,7 @@ struct SearchRow: Decodable, Hashable, Identifiable {
         case region, cabin, pricePP, perNightPP, priceIncludesTaxes, priceSource, priceSeenAt, priceState, typicalPP
         case typicalN, pctUnderTypical, lowestSeenPP, dealTypes, dealId, score, scoreLabel, sourceScore, sourceScoreBy
         case trackedId, fit, unknown, coverage, booking, sources, bookAlternatives
+        case regionBasis, embarkKey, tripCost
     }
 
     init(sailingId: String) {
@@ -261,9 +317,18 @@ struct SearchRow: Decodable, Hashable, Identifiable {
         booking = c.lenient(BookingInfo.self, .booking).flatMap { $0.link == nil ? nil : $0 }
         sources = c.lenient([DealSource].self, .sources)
         bookAlternatives = c.lenient([BookAlternative].self, .bookAlternatives)
+        regionBasis = c.lenient(String.self, .regionBasis)
+        embarkKey = c.lenient(String.self, .embarkKey)
+        tripCost = c.lenient(TripCost.self, .tripCost).flatMap { $0.low == nil && $0.high == nil ? nil : $0 }
     }
 
     var lineName: String { CruiseLine.resolved(line) }
+
+    /// v5: a region filter passed this row only because its region is not known; it is listed last.
+    var regionUnknown: Bool { (unknown ?? []).contains { $0.trimmed.lowercased() == "region" } }
+
+    /// v5: a sailing a schedule lists with no current fare ("price not seen").
+    var scheduleOnly: Bool { priceState == "schedule_only" }
     var shipTitle: String {
         for value in [shipName, ship] {
             if let text = value?.trimmed, !text.isEmpty {
@@ -335,20 +400,34 @@ struct SearchResult: Decodable, Equatable {
     var notes: [String]
     var coverage: [SearchCoverage]
     var generatedAt: String?
+    // v5: why a search came back empty, and what to do about it (CONTRACT_V5 section 1.6)
+    var funnel: [FunnelStep] = []
+    var coverageGap: [CoverageGap] = []
+    var why: [String] = []
 
     enum CodingKeys: String, CodingKey {
-        case rows, total, nextOffset, notes, coverage, generatedAt
+        case rows, total, nextOffset, notes, coverage, generatedAt, funnel, coverageGap, why
     }
 
     init(rows: [SearchRow], total: Int?, nextOffset: Int?, notes: [String], coverage: [SearchCoverage] = [],
-         generatedAt: String? = nil) {
+         generatedAt: String? = nil, funnel: [FunnelStep] = [], coverageGap: [CoverageGap] = [], why: [String] = []) {
         self.rows = rows
         self.total = total
         self.nextOffset = nextOffset
         self.notes = notes
         self.coverage = coverage
         self.generatedAt = generatedAt
+        self.funnel = funnel
+        self.coverageGap = coverageGap
+        self.why = why
     }
+
+    /// The why lines, trimmed, at most 4.
+    var whyLines: [String] {
+        Array(why.map { $0.trimmed }.filter { !$0.isEmpty }.prefix(4))
+    }
+
+    var hasExplanation: Bool { !whyLines.isEmpty || !funnel.isEmpty || !coverageGap.isEmpty }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -360,6 +439,9 @@ struct SearchResult: Decodable, Equatable {
         notes = c.lenient([String].self, .notes) ?? []
         coverage = c.lenient([SearchCoverage].self, .coverage) ?? []
         generatedAt = c.lenient(String.self, .generatedAt)
+        funnel = c.list(FunnelStep.self, .funnel) ?? []
+        coverageGap = c.list(CoverageGap.self, .coverageGap) ?? []
+        why = c.lenient([String].self, .why) ?? []
     }
 }
 

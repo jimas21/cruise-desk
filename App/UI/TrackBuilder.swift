@@ -204,11 +204,18 @@ struct TrackBuilder: View {
                 }
             }
             if store.isV3 {
-                LineRow(name: pick.line, line: store.catalog.line(pick.line))
+                LineRow(name: pick.line, line: store.catalog.line(pick.line),
+                        countText: store.has(.catalog5) ? LineRow.catalogCount(store.catalog.line(pick.line)) : nil)
             }
         } header: {
             Text("Line")
         }
+    }
+
+    /// The catalog port picker, for the one port a tracked sailing leaves from.
+    private var portPick: Binding<[String]> {
+        Binding(get: { pick.port.trimmed.isEmpty ? [] : [pick.port] },
+                set: { pick.port = ($0.last ?? "").capped(30) })
     }
 
     private var lineBinding: Binding<String> {
@@ -249,8 +256,13 @@ struct TrackBuilder: View {
             Text("Ship")
         } footer: {
             if let known = store.catalog.ship(line: pick.line, named: pick.ship) {
-                Text([known.tier?.shipTitle, known.className.map { "\($0) class" }].compactMap { $0 }
-                    .joined(separator: " · "))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text([known.tier?.shipTitle, known.className.map { "\($0) class" }].compactMap { $0 }
+                        .joined(separator: " · "))
+                    if let group = store.catalog.classGroup(line: pick.line, ship: pick.ship) {
+                        ClassShipsLine(group: group, current: pick.ship)
+                    }
+                }
             } else if ships.isEmpty {
                 Text("Deal Desk doesn't list \(pick.line)'s ships yet; type the name as the line writes it.")
             }
@@ -306,6 +318,11 @@ struct TrackBuilder: View {
                 ValueLabel(label: "Nights", value: Fmt.nights(pick.nights))
             }
             TextField("Leaves from (optional)", text: capped(\.port, 30))
+            if store.has(.catalog5) {
+                PickerLink(label: "Pick the port from the catalog", value: pick.port.trimmed.isEmpty ? "None yet" : pick.port) {
+                    PortPickerScreen(title: "Leaves from", kind: .embark, selection: portPick, most: 1)
+                }
+            }
         } header: {
             Text("Sailing")
         } footer: {

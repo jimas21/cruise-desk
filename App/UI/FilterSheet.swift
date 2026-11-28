@@ -11,6 +11,7 @@ struct FilterSheet: View {
     /// Does a deal pass My Trip (for the "Fits my trip" kind).
     let fits: (Deal) -> Bool
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: Store
     @State private var draft: DealFilters
 
     init(filters: Binding<DealFilters>, deals: [Deal], myLines: [String] = [], minPctUnder: Int = 15,
@@ -75,12 +76,19 @@ struct FilterSheet: View {
                     }
                 }
                 Section {
-                    ChipPicker(options: lineIds.map { ReasonOption(id: $0, title: $0) },
-                               selection: chosen(\.lines, order: lineIds))
+                    if pickers {
+                        PickerLink(label: "Lines", value: draft.lines.isEmpty ? "Any line" : ListText.join(draft.lines)) {
+                            LinesPickerScreen(selection: $draft.lines, dealCounts: dealCounts,
+                                              footer: "Every line Deal Desk knows, with how many deals it has on the board now. None picked means any line.")
+                        }
+                    } else {
+                        ChipPicker(options: lineIds.map { ReasonOption(id: $0, title: $0) },
+                                   selection: chosen(\.lines, order: lineIds))
+                    }
                 } header: {
                     Text("Line")
                 } footer: {
-                    if let coverage = coverageNote {
+                    if let coverage = coverageNote, !pickers {
                         Text(coverage)
                     }
                 }
@@ -111,7 +119,20 @@ struct FilterSheet: View {
                 Section("Cabin") {
                     ChipPicker(options: CabinType.allOptions, selection: chosen(\.cabinTypes, order: CabinType.allIds))
                 }
-                if !placeIds.isEmpty {
+                if pickers {
+                    Section {
+                        PickerLink(label: "Leaving from", value: portPlaces.isEmpty ? "Any port" : ListText.join(portPlaces)) {
+                            PortPickerScreen(title: "Leaving from", kind: .embark, selection: portPlacesBinding)
+                        }
+                        PickerLink(label: "Region", value: regionPlaces.isEmpty ? "Anywhere" : ListText.join(regionPlaces)) {
+                            RegionPickerScreen(selection: regionPlacesBinding)
+                        }
+                    } header: {
+                        Text("Where")
+                    } footer: {
+                        Text("Ports and regions come from Deal Desk's catalog, not just the deals on the board.")
+                    }
+                } else if !placeIds.isEmpty {
                     Section("Leaving from") {
                         ChipPicker(options: placeIds.map { ReasonOption(id: $0, title: $0) },
                                    selection: chosen(\.places, order: placeIds))
@@ -145,7 +166,7 @@ struct FilterSheet: View {
                         }
                     }
                 } footer: {
-                    Text("Uses the total for 3 when the deal has one, otherwise the per-person price times 3.")
+                    Text("Uses the deal's trip cost or total for your party when it has one, otherwise the per-person price times the party.")
                 }
             }
             .navigationTitle("Filters")
@@ -172,6 +193,29 @@ struct FilterSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+    }
+
+    // MARK: v5 catalog pickers (CONTRACT_V5 section 1.7)
+
+    private var pickers: Bool { store.has(.catalog5) }
+
+    /// Deals on the board per line, for the line picker.
+    private var dealCounts: [String: Int] {
+        var out: [String: Int] = [:]
+        for deal in deals { out[deal.line, default: 0] += 1 }
+        return out
+    }
+
+    private func isRegion(_ place: String) -> Bool { store.catalog.region(named: place) != nil }
+    private var portPlaces: [String] { draft.places.filter { !isRegion($0) } }
+    private var regionPlaces: [String] { draft.places.filter { isRegion($0) } }
+
+    private var portPlacesBinding: Binding<[String]> {
+        Binding(get: { portPlaces }, set: { draft.places = $0 + regionPlaces })
+    }
+
+    private var regionPlacesBinding: Binding<[String]> {
+        Binding(get: { regionPlaces }, set: { draft.places = portPlaces + $0 })
     }
 
     // MARK: Bindings
@@ -230,4 +274,5 @@ extension CabinType {
 
 #Preview("Filters") {
     FilterSheet(filters: .constant(DealFilters()), deals: Samples.deals)
+        .environmentObject(Store.preview())
 }

@@ -227,12 +227,17 @@ struct CatalogShip: Codable, Hashable {
     var code: String? = nil
     var passengers: Int? = nil
     var maidenYear: Int? = nil
+    // v5 (ship sizes): from the deal server when it has them; nil until then.
+    var lengthFt: Double? = nil
+    var beamFt: Double? = nil
+    var decks: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case name, slug
         case className = "class"
         case classSlug, size, gt
         case code, passengers, maidenYear
+        case lengthFt, beamFt, decks
     }
 
     /// The slug the server matches on (its own, else worked out from the name the same way).
@@ -256,6 +261,10 @@ extension CatalogShip {
         code = c.lenient(String.self, .code)
         passengers = c.lenient(Int.self, .passengers)
         maidenYear = c.lenient(Int.self, .maidenYear)
+        let alt = try decoder.container(keyedBy: AnyKey.self)
+        lengthFt = alt.number(["lengthFt", "length_ft", "lenFt"])
+        beamFt = alt.number(["beamFt", "beam_ft"])
+        decks = alt.number(["decks"]).map { Int($0.rounded()) }
     }
 }
 
@@ -296,9 +305,11 @@ struct CatalogLine: Codable, Hashable {
     var ships: [CatalogShip]?
     // v4
     var booking: CatalogBooking? = nil
+    // v5: what each source lists for this line
+    var sources: [CatalogLineSource]? = nil
 
     enum CodingKeys: String, CodingKey {
-        case name, slug, coverage, coverageNote, liveSources, sailings, ships, booking
+        case name, slug, coverage, coverageNote, liveSources, sailings, ships, booking, sources
     }
 
     var coverageState: Coverage? { Coverage(coverage) }
@@ -315,6 +326,7 @@ extension CatalogLine {
         sailings = c.lenient(Int.self, .sailings)
         ships = c.lenient([CatalogShip].self, .ships)
         booking = c.lenient(CatalogBooking.self, .booking)
+        sources = c.list(CatalogLineSource.self, .sources)
     }
 }
 
@@ -347,9 +359,12 @@ struct Catalog: Codable, Hashable {
     var lines: [CatalogLine]?
     // v4
     var features: [String]? = nil
+    // v5 (CONTRACT_V5 section 1.3): the region tree and where the For-my-trip line filter comes from.
+    var regions: [CatalogRegion]? = nil
+    var linesState: LinesState? = nil
 
     enum CodingKeys: String, CodingKey {
-        case apiVersion, catalogVersion, generatedAt, sizes, lines, features
+        case apiVersion, catalogVersion, generatedAt, sizes, lines, features, regions, linesState
     }
 
     /// The deal server speaks v3 (lines, tracking, the refresh nudge).
@@ -448,6 +463,8 @@ extension Catalog {
         sizes = c.lenient([CatalogSize].self, .sizes)
         lines = c.lenient([CatalogLine].self, .lines)
         features = c.lenient([String].self, .features)
+        regions = c.list(CatalogRegion.self, .regions)
+        linesState = c.lenient(LinesState.self, .linesState)
     }
 }
 

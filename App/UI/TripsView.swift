@@ -354,6 +354,9 @@ struct PastTripEditor: View {
                     Text("Overall")
                 }
                 detailsSection
+                if store.has(.reference) {
+                    TripExtrasSection(extras: $draft.extras)
+                }
                 if editing != nil {
                     Section {
                         Button("Delete this trip", role: .destructive) { confirmDelete = true }
@@ -748,5 +751,55 @@ struct PortKnobsSection: View {
             return
         }
         store.savePortKnobs(recencyMonths: months, fadeMonths: max(fade, months, 1), useRatings: useRatings)
+    }
+}
+
+/// What we had (CONTRACT_V5 section 3.5): a drinks package, Wi-Fi, a promo, and whether we liked it. Soft facts:
+/// they never filter, they only shape the wording on later deals and the per-line guide.
+struct TripExtrasSection: View {
+    @Binding var extras: [TripExtra]
+
+    var body: some View {
+        Section {
+            ForEach($extras) { $extra in
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("e.g. Free at Sea, Deluxe drinks, VOOM Wi-Fi", text: Binding(
+                        get: { $extra.wrappedValue.name }, set: { $extra.wrappedValue.name = String($0.prefix(40)) }))
+                        .textInputAutocapitalization(.words)
+                    Picker("What it was", selection: Binding(get: { $extra.wrappedValue.kind ?? "" },
+                                                             set: { $extra.wrappedValue.kind = $0.isEmpty ? nil : $0 })) {
+                        Text("Not sure").tag("")
+                        ForEach(AddonKind.all, id: \.self) { kind in
+                            Text(AddonKind.title(kind)).tag(kind)
+                        }
+                    }
+                    Picker("How we got it", selection: $extra.how) {
+                        ForEach(TripExtra.hows, id: \.id) { how in
+                            Text(how.title).tag(how.id)
+                        }
+                    }
+                    Picker("Did we like it", selection: Binding(get: { $extra.wrappedValue.liked.map { $0 ? 1 : 0 } ?? -1 },
+                                                                set: { $extra.wrappedValue.liked = $0 < 0 ? nil : $0 == 1 })) {
+                        Text("Not sure").tag(-1)
+                        Text("Liked it").tag(1)
+                        Text("Not really").tag(0)
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .padding(.vertical, 4)
+            }
+            .onDelete { extras.remove(atOffsets: $0) }
+            if extras.count < 8 {
+                Button {
+                    extras.append(TripExtra())
+                } label: {
+                    Label("Add what we had", systemImage: "plus.circle")
+                }
+            }
+        } header: {
+            Text("What we had")
+        } footer: {
+            Text("Packages, Wi-Fi or a promo on this trip. Deal Desk uses it only for wording, never to filter.")
+        }
     }
 }

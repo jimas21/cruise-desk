@@ -198,6 +198,10 @@ private struct SummaryLines: View {
             CabinLine(deal: deal)
             MoneyLine(deal: deal)
                 .padding(.top, 2)
+            if CatalogIndex.current.has(.sheet), let cost = deal.sheet?.tripCost {
+                // v5: the trip cost for the party and the verdict word (CONTRACT_V5 section 2.8).
+                TripCostLine(cost: cost)
+            }
             if let range = deal.priceRange {
                 PriceMeter(range: range, pctUnder: deal.pctUnder, style: .card)
             } else if let under = UnderTypical.text(pct: deal.pctUnder, typical: deal.typicalPP) {
@@ -251,7 +255,7 @@ struct MoneyLine: View {
     private var quiet: Color { onColor ? Color.white.opacity(0.8) : Color.secondary }
 
     private var big: (amount: Int, unit: String)? {
-        if let total = deal.data.totalFor3 { return (total, "for 3") }
+        if let total = deal.data.totalFor3 { return (total, PartyText.unit) }
         if let pp = deal.data.pricePP, pp > 0 { return (pp, "pp") }
         return nil
     }
