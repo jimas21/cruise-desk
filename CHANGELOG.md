@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/jimas21/cruise-desk/compare/v1.5.0...v1.5.1) (2026-11-28)
+
+
+### Fixes
+
+* ground ports save as catalog keys; the firm total names only the lines it holds ([ce9076a](https://github.com/jimas21/cruise-desk/commit/ce9076af82876e2dad88c8d17f3931c129a70191))
+
 ## [1.5.0](https://github.com/jimas21/cruise-desk/compare/v1.4.0...v1.5.0) (2026-11-28)
 
 
