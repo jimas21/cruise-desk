@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/jimas21/cruise-desk/compare/v1.3.0...v1.4.0) (2026-11-28)
+
+
+### Features
+
+* Deal Desk v4: Book on the line's own site, Newsletters, Search and plans, My trips with port ratings ([93274a3](https://github.com/jimas21/cruise-desk/commit/93274a3e5ef9b7e7b63b8529271b029096524c8e))
+
 ## [1.3.0](https://github.com/jimas21/cruise-desk/compare/v1.2.1...v1.3.0) (2026-11-27)
 
 
