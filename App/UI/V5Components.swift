@@ -412,10 +412,13 @@ struct PortPickerScreen: View {
     @Binding var selection: [String]
     var most = 10
     var footer: String? = nil
+    /// True when `selection` holds catalog port KEYS (seattle, port-canaveral) rather than display names.
+    var byKey = false
     @EnvironmentObject private var store: Store
     @State private var text = ""
     @State private var results: [CatalogPort] = []
     @State private var loading = false
+    @State private var names: [String: String] = [:]
 
     var body: some View {
         List {
@@ -426,13 +429,13 @@ struct PortPickerScreen: View {
                             remove(name)
                         } label: {
                             HStack {
-                                Text(name).foregroundStyle(Color.primary)
+                                Text(shown(name)).foregroundStyle(Color.primary)
                                 Spacer()
                                 Image(systemName: "xmark.circle.fill")
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        .accessibilityLabel(Text(name))
+                        .accessibilityLabel(Text(shown(name)))
                         .accessibilityHint(Text("Removes it"))
                     }
                 }
@@ -449,9 +452,9 @@ struct PortPickerScreen: View {
                         .foregroundStyle(.secondary)
                 }
                 ForEach(results) { port in
-                    let picked = isPicked(port.name)
+                    let picked = isPicked(value(port))
                     Button {
-                        toggle(port.name)
+                        toggle(port)
                     } label: {
                         HStack(alignment: .center, spacing: 10) {
                             VStack(alignment: .leading, spacing: 2) {
@@ -490,17 +493,27 @@ struct PortPickerScreen: View {
             let found = await store.catalogPorts(matching: text, kind: kind)
             if Task.isCancelled { return }
             results = found
+            for port in found { names[port.key.lowercased()] = port.name }
             loading = false
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    private func value(_ port: CatalogPort) -> String { byKey ? port.key : port.name }
+
+    /// What a chosen entry reads as: the catalog name for a key, else the key made readable.
+    private func shown(_ entry: String) -> String {
+        guard byKey else { return entry }
+        return names[entry.lowercased()] ?? Words.title(fromSlug: entry)
+    }
+
     private func isPicked(_ name: String) -> Bool {
         selection.contains { $0.caseInsensitiveCompare(name) == .orderedSame }
     }
 
-    private func toggle(_ name: String) {
+    private func toggle(_ port: CatalogPort) {
+        let name = value(port)
         if isPicked(name) {
             remove(name)
         } else if selection.count < most {

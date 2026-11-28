@@ -257,8 +257,8 @@ struct TripCostSettingsView: View {
             }
             Section {
                 PickerLink(label: "Ports we drive to",
-                           value: groundPorts.isEmpty ? "None: the ports at your home airport count as home" : ListText.join(groundPorts)) {
-                    PortPickerScreen(title: "Ports we drive to", kind: .embark, selection: $groundPorts,
+                           value: groundPorts.isEmpty ? "None: the ports at your home airport count as home" : ListText.join(groundPorts.map { Words.title(fromSlug: $0) })) {
+                    PortPickerScreen(title: "Ports we drive to", kind: .embark, selection: $groundPorts, byKey: true,
                                      footer: "Sailings from these count as drive or train: no flight and no hotel in the total.")
                 }
             } footer: {

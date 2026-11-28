@@ -156,6 +156,20 @@ final class V5Tests: XCTestCase {
 
     // MARK: The sheet (CONTRACT_V5 section 2)
 
+    func testFirmTextNamesOnlyWhatIsIn() throws {
+        var sheet = try XCTUnwrap(Samples.sheet)
+        let i = try XCTUnwrap(sheet.lines.firstIndex { $0.key == "gratuities" })
+        sheet.lines[i].basis = "not_shown"
+        XCTAssertEqual(sheet.firmText, "Cruise + taxes $3,452")
+        let t = try XCTUnwrap(sheet.lines.firstIndex { $0.key == "taxes" })
+        sheet.lines[t].basis = "not_shown"
+        XCTAssertEqual(sheet.firmText, "Cruise only $3,452")
+    }
+
+    func testGroundPortsSaveAsKeysNotNames() {
+        XCTAssertEqual(Words.title(fromSlug: "port-canaveral"), "Port Canaveral")
+    }
+
     func testSheetDecodesAndReadsPlainly() throws {
         let sheet = try XCTUnwrap(Samples.sheet)
         XCTAssertEqual(sheet.partyText, "for 2 adults + 1 child")

@@ -1292,10 +1292,16 @@ struct DealSheet: Decodable, Hashable {
     /// "for 2 adults + 1 child"
     var partyText: String? { party?.words.map { "for \($0)" } }
 
-    /// "Cruise, taxes, tips $3,636"
+    /// "Cruise, taxes, tips $3,636": names only what the firm figure really holds (a line that is not shown is out).
     var firmText: String? {
         guard let firm = total?.firm else { return nil }
-        return "Cruise, taxes, tips \(Fmt.usd(firm))"
+        func counted(_ key: String) -> Bool {
+            guard let line = lines.first(where: { $0.key == key }) else { return false }
+            return line.basisValue != .notShown
+        }
+        let taxes = counted("taxes"), tips = counted("gratuities")
+        let label = taxes && tips ? "Cruise, taxes, tips" : taxes ? "Cruise + taxes" : tips ? "Cruise + tips" : "Cruise only"
+        return "\(label) \(Fmt.usd(firm))"
     }
 
     var cabinTitle: String? {
