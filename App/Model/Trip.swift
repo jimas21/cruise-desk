@@ -287,7 +287,10 @@ struct TripPrefs: Decodable, Equatable {
     }
 
     /// One glance line for the For my trip bucket: "Icon · Oasis · 4–7 nights · Balcony, ocean view · under $3,000".
-    var summary: String {
+    var summary: String { summary(softBudget: false) }
+
+    /// With a soft budget (v5) the line says "aim for $3,000": a target, never a filter.
+    func summary(softBudget: Bool) -> String {
         var parts: [String] = []
         if lines != nil { parts.append(linesSummary) }
         let classes = ShipClass.allCases.filter { shipClasses.contains($0.rawValue) }
@@ -305,7 +308,11 @@ struct TripPrefs: Decodable, Equatable {
             if requireOceanView && cabins.contains("balcony") { cabin += ", ocean view" }
             parts.append(cabin)
         }
-        parts.append("under \(Fmt.usd(max(budgetTotal, tradeoffBudget ?? 0)))")
+        if softBudget {
+            parts.append("aim for \(Fmt.usd(budgetTotal))")
+        } else {
+            parts.append("under \(Fmt.usd(max(budgetTotal, tradeoffBudget ?? 0)))")
+        }
         return parts.joined(separator: " · ")
     }
 }
@@ -325,15 +332,17 @@ struct TripFit: Equatable {
 /// The same rules the brain applies (prompt.md section 2), worked out on the phone so the buckets move the moment
 /// Jim changes a setting. Unknown facts never fail a deal; the card already says what is unconfirmed.
 enum TripCheck {
-    static func verdict(for deal: Deal, prefs: TripPrefs?) -> TripFit {
-        if let prefs { return evaluate(deal, prefs) }
+    /// `softBudget` (a v5 server, which lists `sheet`): the budget is a target, never a filter (Jim: "flexible but
+    /// less is better"). An over-budget deal still fits; its caption says how far over, from the sheet.
+    static func verdict(for deal: Deal, prefs: TripPrefs?, softBudget: Bool = false) -> TripFit {
+        if let prefs { return evaluate(deal, prefs, softBudget: softBudget) }
         // No settings on this phone yet: use the brain's own verdict from when it wrote the deal.
         if deal.kind == .sale { return TripFit(fits: false) }
         let reasons = deal.data.failsBecause ?? (deal.data.breaks.map { [$0] } ?? [])
         return TripFit(fits: deal.data.fitsTrip ?? (deal.kind == .fits), reasons: reasons)
     }
 
-    static func evaluate(_ deal: Deal, _ p: TripPrefs) -> TripFit {
+    static func evaluate(_ deal: Deal, _ p: TripPrefs, softBudget: Bool = false) -> TripFit {
         if deal.kind == .sale { return TripFit(fits: false) }
         let d = deal.data
         var why: [String] = []
@@ -398,7 +407,10 @@ enum TripCheck {
         } else if let pp = d.pricePP, pp > 0 {
             total = pp * p.party
         }
-        if let total {
+        if softBudget {
+            // Never a reason it fails; only the sheet's own figure says how far over (no fare is invented here).
+            tradeoff = deal.sheet?.budget?.shortNote
+        } else if let total {
             let cap = max(p.budgetTotal, p.tradeoffBudget ?? 0)
             let soft = min(p.budgetTotal, p.tradeoffBudget ?? p.budgetTotal)
             if total > cap {

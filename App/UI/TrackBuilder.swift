@@ -317,11 +317,14 @@ struct TrackBuilder: View {
             Stepper(value: $pick.nights, in: 1...30) {
                 ValueLabel(label: "Nights", value: Fmt.nights(pick.nights))
             }
-            TextField("Leaves from (optional)", text: capped(\.port, 30))
             if store.has(.catalog5) {
-                PickerLink(label: "Pick the port from the catalog", value: pick.port.trimmed.isEmpty ? "None yet" : pick.port) {
-                    PortPickerScreen(title: "Leaves from", kind: .embark, selection: portPick, most: 1)
+                // Picker only (CONTRACT_V5 1.7): typed text would skip the catalog's port keys.
+                PickerLink(label: "Leaves from (optional)", value: pick.port.trimmed.isEmpty ? "Pick a port" : pick.port) {
+                    PortPickerScreen(title: "Leaves from", kind: .embark, selection: portPick, most: 1,
+                                     footer: "From Deal Desk's port catalog. Pick one, or leave it empty.")
                 }
+            } else {
+                TextField("Leaves from (optional)", text: capped(\.port, 30))
             }
         } header: {
             Text("Sailing")

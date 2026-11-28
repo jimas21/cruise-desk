@@ -34,6 +34,14 @@ A native iPhone app for the cruise deal desk: the deals Claude finds, one glance
   what Deal Desk knows about that sailing), with a port's history. Loved ports lift sailings that stop there and
   recently visited ones count a little less for a while ("you were in Cozumel 4 weeks ago"); neither ever hides a
   deal or holds back an alert.
+- **Trip cost and verdict** (v5): every deal, tracked sailing and search result opens one sheet with the whole trip
+  for the party (each figure tagged read, rule, estimate, included or not shown; a range whenever something is
+  missing), the verdict (Book, Wait, Skip or Your call) and what to buy. List rows show the range, never one figure.
+  The budget is a soft target: a sailing over it still shows, with "$640 over your $3,000 target".
+- **Getting there** (1.6, when the server lists `flights`): home, drive (the ports you mark) or fly. A flight is a
+  recent fare seen, per person in economy, with its date and route, counted in the trip cost as an estimate and
+  never shown as a quote. On the day the ship returns, flights home are taken at 1 PM or later (a fare for the day
+  says "return after 1 PM assumed").
 - **My Trip**: lines, ship sizes, Royal Caribbean classes, length, cabin, who's going, budget, ports, regions, dates
   and sail months, what counts as a deal (new low, % under typical, price drop, sale, fits my trip; the lowest
   score), alerts and how often to check, in plain words. The buckets re-sort on the phone the moment it is saved;

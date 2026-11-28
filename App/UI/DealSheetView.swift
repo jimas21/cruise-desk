@@ -4,9 +4,9 @@ import SwiftUI
 /// cost for the party with every line tagged by where it came from, the verdict in one word and one line, the
 /// cabin against the budget, then What to buy, Getting there and Pay & cancel. Every figure is the server's.
 struct DealSheetSections: View {
-    /// The trip cost alone (it leads a deal), the rest alone (after the scoop), or all of it.
+    /// The trip cost alone (it leads a deal), the rest alone (after the scoop), Getting there alone, or all of it.
     enum Part {
-        case all, cost, more
+        case all, cost, more, travel
     }
 
     let sheet: DealSheet
@@ -15,15 +15,25 @@ struct DealSheetSections: View {
     /// The fare score, relabelled "Price score": the verdict is the trip-level answer.
     var priceScore: Int? = nil
     var priceLabel: String? = nil
+    /// Where the sailing leaves from, for Getting there ("Drive to Vancouver"). Last, so every call site passes the
+    /// arguments in declaration order.
+    var port: String? = nil
     @EnvironmentObject private var store: Store
     @State private var showMissing = false
 
     var body: some View {
         Group {
-            if part != .more {
+            switch part {
+            case .travel:
+                travelSection
+            case .cost:
                 costSection
-            }
-            if part != .cost {
+            case .more:
+                buySection
+                travelSection
+                paySection
+            case .all:
+                costSection
                 buySection
                 travelSection
                 paySection
@@ -97,13 +107,15 @@ struct DealSheetSections: View {
             }
 
             ForEach(sheet.lines) { item in
-                SheetLineRow(line: item)
+                SheetLineRow(line: item, detail: sheet.detail(for: item), basisTag: sheet.tag(for: item))
             }
             if let budget = sheet.budget?.line {
+                // A soft target: it says how far over, and never hides the sailing.
                 Text(budget)
                     .font(.footnote.weight(.medium))
-                    .foregroundStyle(sheet.budget?.state == "over" ? Palette.call : Color.secondary)
+                    .foregroundStyle(sheet.budget?.isOver == true ? Palette.call : Color.secondary)
                     .monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
             }
         } header: {
             Text("Trip cost")
@@ -184,7 +196,7 @@ struct DealSheetSections: View {
     private var travelSection: some View {
         Section {
             if let travel = sheet.travel {
-                TravelRows(travel: travel, flightsOn: store.has(.flights))
+                TravelRows(travel: travel, flightsOn: store.has(.flights), port: port)
             } else {
                 Text("Set your home airport in My Trip to see how you'd get to the ship.")
                     .font(.subheadline)
@@ -195,6 +207,8 @@ struct DealSheetSections: View {
         } footer: {
             if !store.has(.flights) {
                 Text("Flight estimates switch on once the deal server has them; until then nothing for flights is in the total.")
+            } else if sheet.travel?.modeValue == .fly {
+                Text("A flight figure is a recent fare someone saw for those dates, per person in economy: an estimate in the trip cost, not a quote. Check the price before you book.")
             }
         }
     }
@@ -238,9 +252,13 @@ struct DealSheetSections: View {
 /// One money line: what it is, the amount, and a small tag saying where it came from.
 struct SheetLineRow: View {
     let line: SheetLine
+    /// The sheet's own words for this line (the flights line's basis), else the line's detail.
+    var detail: String? = nil
+    var basisTag: String? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private var dimmed: Bool { line.counted == false || line.basisValue == .notShown }
+    private var detailText: String? { detail ?? line.detail }
 
     var body: some View {
         Group {
@@ -264,7 +282,7 @@ struct SheetLineRow: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(line.title)
                 .foregroundStyle(dimmed ? Color.secondary : Color.primary)
-            if let detail = line.detail?.trimmed, !detail.isEmpty {
+            if let detail = detailText?.trimmed, !detail.isEmpty {
                 Text(detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -278,7 +296,7 @@ struct SheetLineRow: View {
             Text(line.amountText)
                 .monospacedDigit()
                 .foregroundStyle(dimmed ? Color.secondary : Color.primary)
-            BasisTag(text: line.tag)
+            BasisTag(text: basisTag ?? line.tag)
         }
     }
 }
@@ -310,17 +328,26 @@ struct WhatToBuyRow: View {
     }
 }
 
-/// Home, drive or fly; the line's own air program as an option (never a price); the hotel night.
+/// Home, drive or fly; the flight estimate with its basis and the disembark-day rule; the line's own air program
+/// as an option (never a price); the hotel night.
 private struct TravelRows: View {
     let travel: SheetTravel
     let flightsOn: Bool
+    var port: String? = nil
+
+    private var portName: String? {
+        guard let name = port?.trimmed, !name.isEmpty else { return nil }
+        return name
+    }
 
     var body: some View {
         switch travel.modeValue {
         case .home:
-            Label("You live here: no flight and no hotel to add.", systemImage: "house")
+            Label(portName.map { "Sails from home (\($0)): no flight and no hotel to add." }
+                    ?? "You live here: no flight and no hotel to add.", systemImage: "house")
         case .drive:
-            Label("Drive or take the train; not priced and not in the total.", systemImage: "car")
+            Label(portName.map { "Drive to \($0), or take the train: no flight, not priced and not in the total." }
+                    ?? "Drive or take the train: no flight, not priced and not in the total.", systemImage: "car")
         case .fly:
             flyRows
         case .notKnown:
@@ -349,15 +376,49 @@ private struct TravelRows: View {
 
     @ViewBuilder
     private var flyRows: some View {
-        let route = [travel.fromAirport, travel.toAirport].compactMap { $0 }.joined(separator: "–")
-        if let flight = travel.flight, flightsOn, let pp = flight.pp {
-            InfoRow(label: route.isEmpty ? "Flight" : "Fly \(route)", value: "about \(Fmt.usd(pp)) pp",
-                    note: [flight.ageDays.map { "estimate · \($0 == 1 ? "1 day" : "\($0) days") old" },
-                           flight.provider].compactMap { $0 }.joined(separator: " · "))
+        let title = travel.route.map { "Fly \($0)" } ?? "Fly"
+        if flightsOn, let flight = travel.flight, flight.isReady, let pp = flight.pp {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(title)
+                    Spacer(minLength: 8)
+                    Text("about \(Fmt.usd(pp)) pp")
+                        .monospacedDigit()
+                }
+                if let basis = travel.flightBasis {
+                    Text(basis)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let total = flight.total, total > 0 {
+                    Text("About \(Fmt.usd(total)) for everyone, round trip, in the trip cost")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                BasisTag(text: "estimate · not a quote")
+            }
+            .accessibilityElement(children: .combine)
         } else {
-            InfoRow(label: route.isEmpty ? "Fly" : "Fly \(route)",
-                    value: flightStateText(travel.flight?.state),
-                    note: Fmt.day(travel.departDate).map { "out \(Fmt.shortDay($0))" })
+            InfoRow(label: title, value: flightStateText(travel.flight?.state))
+        }
+        if let dates = travel.datesText(rule: flightsOn || travel.returnNotBefore != nil) {
+            Text(dates)
+                .font(.subheadline)
+                .monospacedDigit()
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if let rule = travel.disembarkNote(flightsOn: flightsOn) {
+            Label {
+                Text(rule)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "clock")
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
         }
         if let hotel = travel.hotel, (hotel.nights ?? 0) > 0 {
             if let range = Money.range(hotel.low, hotel.high) {
@@ -374,12 +435,14 @@ private struct TravelRows: View {
         }
     }
 
+    /// Unknown stays "not shown": a flight figure is never invented.
     private func flightStateText(_ state: String?) -> String {
+        guard flightsOn else { return "estimate not set up" }
         switch state ?? "" {
         case "pending": return "looking up an estimate"
         case "not_set_up": return "estimate not set up"
-        case "none": return "no estimate"
-        default: return flightsOn ? "no estimate yet" : "estimate not set up"
+        case "ready", "none": return "not shown"
+        default: return "not shown yet"
         }
     }
 }
@@ -431,7 +494,8 @@ struct SailingSheetScreen: View {
             }
 
             if let sheet {
-                DealSheetSections(sheet: sheet, line: row.lineName, priceScore: row.score, priceLabel: row.scoreLabel)
+                DealSheetSections(sheet: sheet, line: row.lineName, priceScore: row.score, priceLabel: row.scoreLabel,
+                                  port: row.embarkPort)
             } else if store.has(.sheet) && !loaded {
                 Section {
                     HStack(spacing: 10) {

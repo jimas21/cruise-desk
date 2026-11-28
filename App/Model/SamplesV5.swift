@@ -180,14 +180,7 @@ extension Samples {
         ]
         let needle = text.trimmed.lowercased()
         return all.filter { port in
-            let kindOK: Bool
-            switch kind {
-            case .embark: kindOK = port.kind == "embark" || port.kind == "both"
-            case .call: kindOK = port.kind == "call" || port.kind == "both" || port.kind == "scenic"
-            case .scenic: kindOK = port.kind == "scenic"
-            case .any: kindOK = true
-            }
-            return kindOK && (needle.isEmpty || port.name.lowercased().contains(needle))
+            kind.admits(port.kind) && (needle.isEmpty || port.name.lowercased().contains(needle))
         }
     }
 

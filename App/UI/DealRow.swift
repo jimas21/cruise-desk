@@ -199,8 +199,9 @@ private struct SummaryLines: View {
             MoneyLine(deal: deal)
                 .padding(.top, 2)
             if CatalogIndex.current.has(.sheet), let cost = deal.sheet?.tripCost {
-                // v5: the trip cost for the party and the verdict word (CONTRACT_V5 section 2.8).
-                TripCostLine(cost: cost)
+                // v5: the trip cost for the party and the verdict word (CONTRACT_V5 section 2.8). The range itself
+                // is the money line's big figure, so this line carries the verdict and what is not shown.
+                TripCostLine(cost: cost, showRange: MoneyLine.tripRange(deal) == nil)
             }
             if let range = deal.priceRange {
                 PriceMeter(range: range, pctUnder: deal.pctUnder, style: .card)
@@ -246,23 +247,35 @@ struct CabinLine: View {
     }
 }
 
-/// The money line: the family's total large (or the per-person price when there is no total), then
-/// "$1,276 pp · taxes in" small. `onColor` is the white version for the detail hero.
+/// The money line: the trip cost range large when the deal has a sheet (v5), else the family's total (or the
+/// per-person price when there is no total), then "$1,276 pp · taxes in" small. `onColor` is the white version for
+/// the detail hero.
 struct MoneyLine: View {
     let deal: Deal
     var onColor = false
 
     private var quiet: Color { onColor ? Color.white.opacity(0.8) : Color.secondary }
 
-    private var big: (amount: Int, unit: String)? {
-        if let total = deal.data.totalFor3 { return (total, PartyText.unit) }
-        if let pp = deal.data.pricePP, pp > 0 { return (pp, "pp") }
+    /// The range ("$3,716–5,040", or "up to $5,040"), never one figure that hides the 3rd guest's unknown fare.
+    private var tripRange: String? { MoneyLine.tripRange(deal) }
+
+    /// The sheet's trip cost range, when the server lists `sheet` and the deal carries one. `totalFor3` stays for
+    /// older servers only.
+    static func tripRange(_ deal: Deal) -> String? {
+        guard CatalogIndex.current.has(.sheet), deal.kind != .sale, let cost = deal.sheet?.tripCost else { return nil }
+        return cost.range
+    }
+
+    private var big: (text: String, unit: String)? {
+        if let tripRange { return (tripRange, "trip \(PartyText.unit)") }
+        if let total = deal.data.totalFor3 { return (Fmt.usd(total), PartyText.unit) }
+        if let pp = deal.data.pricePP, pp > 0 { return (Fmt.usd(pp), "pp") }
         return nil
     }
 
-    /// Per-person price, shown small only when the big number is the total.
+    /// Per-person price, shown small only when the big number is a total.
     private var perPerson: Int? {
-        guard deal.data.totalFor3 != nil, let pp = deal.data.pricePP, pp > 0 else { return nil }
+        guard tripRange != nil || deal.data.totalFor3 != nil, let pp = deal.data.pricePP, pp > 0 else { return nil }
         return pp
     }
 
@@ -281,21 +294,21 @@ struct MoneyLine: View {
         if let big {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    bigText(big.amount, big.unit)
+                    bigText(big.text, big.unit)
                     Spacer(minLength: 8)
                     details
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    bigText(big.amount, big.unit)
+                    bigText(big.text, big.unit)
                     details
                 }
             }
         }
     }
 
-    private func bigText(_ amount: Int, _ unit: String) -> some View {
+    private func bigText(_ amount: String, _ unit: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Text(Fmt.usd(amount))
+            Text(amount)
                 .font(.system(onColor ? Font.TextStyle.title : Font.TextStyle.title2, design: .rounded, weight: .semibold))
                 .monospacedDigit()
                 .foregroundStyle(onColor ? Color.white : Color.primary)

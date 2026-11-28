@@ -219,9 +219,21 @@ enum PlaceMatch {
 
 // MARK: - Catalog ports (`GET /v1/catalog/ports`)
 
-/// The kind of place a port picker asks for: embark (= embark or both), call (= call or both), or any.
+/// The kind of place a port picker asks for: embark (= embark or both), call (= call or both), visit (= call, both
+/// or scenic: every place a sailing stops at or cruises past, so Glacier Bay can be picked), or any.
 enum PortKind: String {
-    case embark, call, scenic, any
+    case embark, call, scenic, visit, any
+
+    /// Does a catalog port of `kind` belong in this picker? (The same rule the server applies.)
+    func admits(_ kind: String?) -> Bool {
+        switch self {
+        case .embark: return kind == "embark" || kind == "both"
+        case .call: return kind == "call" || kind == "both"
+        case .scenic: return kind == "scenic"
+        case .visit: return kind == "call" || kind == "both" || kind == "scenic"
+        case .any: return true
+        }
+    }
 }
 
 struct CatalogPort: Decodable, Hashable, Identifiable {
@@ -692,17 +704,22 @@ struct SheetParty: Decodable, Hashable {
     var adults: Int?
     var children: Int?
     var childAges: [Int]?
+    /// The children's ages on the sailing date, worked out by the server from their birth months. The only age to
+    /// show for a future sailing (the stored `childAges` is today's).
+    var agesOnSailing: [Int]?
     var guests: Int?
     var childAgesKnown: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case adults, children, childAges, guests, childAgesKnown
+        case adults, children, childAges, agesOnSailing, guests, childAgesKnown
     }
 
-    init(adults: Int?, children: Int?, childAges: [Int]? = nil, guests: Int? = nil, childAgesKnown: Bool? = nil) {
+    init(adults: Int?, children: Int?, childAges: [Int]? = nil, agesOnSailing: [Int]? = nil, guests: Int? = nil,
+         childAgesKnown: Bool? = nil) {
         self.adults = adults
         self.children = children
         self.childAges = childAges
+        self.agesOnSailing = agesOnSailing
         self.guests = guests
         self.childAgesKnown = childAgesKnown
     }
@@ -712,6 +729,7 @@ struct SheetParty: Decodable, Hashable {
         adults = c.whole(.adults)
         children = c.whole(.children)
         childAges = c.lenient([Int].self, .childAges)
+        agesOnSailing = c.lenient([Int].self, .agesOnSailing)
         guests = c.whole(.guests)
         childAgesKnown = c.lenient(Bool.self, .childAgesKnown)
     }
@@ -720,6 +738,14 @@ struct SheetParty: Decodable, Hashable {
     var words: String? {
         guard let adults else { return guests.map { $0 == 1 ? "1 guest" : "\($0) guests" } }
         return PartyText.words(adults: adults, children: children ?? 0)
+    }
+
+    /// "age 10 on the sailing", "ages 10 and 7 on the sailing": only from `agesOnSailing`, never today's ages.
+    var agesText: String? {
+        let ages = (agesOnSailing ?? []).filter { (0...17).contains($0) }
+        guard !ages.isEmpty, ages.count == (agesOnSailing ?? []).count else { return nil }
+        let list = ListText.join(ages.map { String($0) })
+        return ages.count == 1 ? "age \(list) on the sailing" : "ages \(list) on the sailing"
     }
 }
 
@@ -855,23 +881,32 @@ struct SheetTotal: Decodable, Hashable {
     var isComplete: Bool { complete == true && missing.isEmpty }
 }
 
+/// The trip cost against Jim's budget. The budget is a SOFT target (Jim: "flexible but less is better"): it never
+/// filters or hides a sailing; the sheet only says how far over it is.
 struct SheetBudget: Decodable, Hashable {
     var budgetTotal: Int?
     var basis: String?
     var low: Int?
     var high: Int?
     var state: String?
+    /// How far the low end is over the target (the server's figure).
+    var overBy: Int?
+    /// False when a part the target counts is not shown yet, so "under" is only "under so far".
+    var complete: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case budgetTotal, basis, low, high, state
+        case budgetTotal, basis, low, high, state, overBy, complete
     }
 
-    init(budgetTotal: Int?, basis: String?, low: Int?, high: Int?, state: String?) {
+    init(budgetTotal: Int?, basis: String?, low: Int?, high: Int?, state: String?, overBy: Int? = nil,
+         complete: Bool? = nil) {
         self.budgetTotal = budgetTotal
         self.basis = basis
         self.low = low
         self.high = high
         self.state = state
+        self.overBy = overBy
+        self.complete = complete
     }
 
     init(from decoder: Decoder) throws {
@@ -881,24 +916,64 @@ struct SheetBudget: Decodable, Hashable {
         low = c.whole(.low)
         high = c.whole(.high)
         state = c.lenient(String.self, .state)
+        overBy = c.whole(.overBy)
+        complete = c.lenient(Bool.self, .complete)
     }
 
-    var stateText: String {
-        switch state ?? "" {
-        case "under": return "within budget"
-        case "within_tradeoff": return "at the edge of the budget"
-        case "over": return "over"
-        case "unknown", "": return "not known"
-        default: return Words.humanize(state ?? "").lowercased()
-        }
+    /// "whole trip" or "cabin only": what the target is compared with.
+    var whatText: String { basis == "trip" ? "whole trip" : "cabin only" }
+
+    /// The low end's distance over the target: the server's `overBy`, else worked out from the low end.
+    var over: Int? {
+        if let overBy, overBy > 0 { return overBy }
+        guard let total = budgetTotal, let low, low > total else { return nil }
+        return low - total
     }
 
-    /// "Cabin only vs your $3,000 budget: $3,300 – $4,950 (over)"
+    /// How far the high end could go over while the low end is still under (the range straddles the target).
+    var upTo: Int? {
+        guard over == nil, state != "under", state != "under_so_far", let total = budgetTotal, let high, high > total
+        else { return nil }
+        return high - total
+    }
+
+    /// Under the target only for what is known; something it counts is not shown yet.
+    var underSoFar: Bool {
+        state == "under_so_far" || (state == "under" && complete == false)
+    }
+
+    var isOver: Bool { over != nil }
+
+    /// The short words for a card or the trip check: "$640 over your $3,000 target". nil when under or unknown.
+    var shortNote: String? {
+        guard let total = budgetTotal else { return nil }
+        let target = "your \(Fmt.usd(total)) target"
+        if let over { return "\(Fmt.usd(over)) over \(target)" }
+        if let upTo { return "Up to \(Fmt.usd(upTo)) over \(target)" }
+        return nil
+    }
+
+    /// "$640 over your $3,000 target · whole trip $3,640 – $4,950", "Within your $3,000 target · cabin only $2,900",
+    /// "Under your $3,000 target so far · whole trip $2,100 – $2,800, before what isn't shown".
     var line: String? {
         guard let total = budgetTotal else { return nil }
-        let what = basis == "trip" ? "Whole trip" : "Cabin only"
-        let figure = Money.range(low, high) ?? "not known"
-        return "\(what) vs your \(Fmt.usd(total)) budget: \(figure) (\(stateText))"
+        let target = "your \(Fmt.usd(total)) target"
+        let figure = Money.range(low, high).map { "\(whatText) \($0)" }
+        let lead: String
+        if let note = shortNote {
+            lead = note
+        } else if underSoFar {
+            lead = "Under \(target) so far"
+            return figure.map { "\(lead) · \($0), before what isn't shown" } ?? lead
+        } else if state == "under" {
+            lead = "Within \(target)"
+        } else if let figure, state != "unknown" {
+            return "Your \(Fmt.usd(total)) target · \(figure)"
+        } else {
+            let cost = basis == "trip" ? "the whole-trip cost" : "the cabin cost"
+            return "Your \(Fmt.usd(total)) target · \(cost) isn't known yet"
+        }
+        return figure.map { "\(lead) · \($0)" } ?? lead
     }
 }
 
@@ -1067,24 +1142,76 @@ struct SheetPay: Decodable, Hashable {
     var basisValue: MoneyBasis { MoneyBasis(basis) }
 }
 
+/// The flight estimate (CONTRACT_V5 section 4): a recent fare a provider saw, per person, economy, round trip.
+/// It is an estimate with its basis, never a quote.
 struct SheetFlight: Decodable, Hashable {
     var pp: Int?
     var total: Int?
     var ageDays: Int?
     var provider: String?
     var state: String?
+    /// The day the provider saw the fare ("2026-11-25").
+    var foundAt: String?
+    /// The server's own basis words ("recent fare seen 2026-11-25, SEA–IAH, per person, economy").
+    var basis: String?
+    /// "SEA–IAH" (the airport the fare is for).
+    var route: String?
+    /// "13:00": the earliest flight home on the day the ship returns.
+    var returnNotBefore: String?
+    /// A return departure time, when the provider gave one (a date-level fare has none).
+    var returnTime: String?
 
-    enum CodingKeys: String, CodingKey {
-        case pp, total, ageDays, provider, state
+    init(pp: Int? = nil, total: Int? = nil, ageDays: Int? = nil, provider: String? = nil, state: String?,
+         foundAt: String? = nil, basis: String? = nil, route: String? = nil, returnNotBefore: String? = nil,
+         returnTime: String? = nil) {
+        self.pp = pp
+        self.total = total
+        self.ageDays = ageDays
+        self.provider = provider
+        self.state = state
+        self.foundAt = foundAt
+        self.basis = basis
+        self.route = route
+        self.returnNotBefore = returnNotBefore
+        self.returnTime = returnTime
     }
 
     init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        pp = c.whole(.pp)
-        total = c.whole(.total)
-        ageDays = c.whole(.ageDays)
-        provider = c.lenient(String.self, .provider)
-        state = c.lenient(String.self, .state)
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        func text(_ names: String...) -> String? {
+            for name in names {
+                if let value = c.lenient(String.self, AnyKey(name))?.trimmed, !value.isEmpty { return value }
+            }
+            return nil
+        }
+        pp = c.whole(AnyKey("pp"))
+        total = c.whole(AnyKey("total"))
+        ageDays = c.whole(AnyKey("ageDays"))
+        provider = text("provider")
+        state = text("state")
+        foundAt = text("foundAt", "providerFoundAt", "seenAt")
+        basis = text("basis", "basisText", "label")
+        route = text("route")
+        returnNotBefore = text("returnNotBefore")
+        returnTime = text("returnTime", "returnDepartsAt")
+    }
+
+    /// An estimate is there to show.
+    var isReady: Bool { state == "ready" && (pp ?? 0) > 0 }
+}
+
+/// Clock times the way the screens say them: "13:00" -> "1 PM", "13:30" -> "1:30 PM".
+enum ClockWords {
+    /// The disembark-day rule's line-agnostic default: a flight home on the return date leaves at or after 1 PM.
+    static let defaultReturnNotBefore = "13:00"
+
+    static func words(_ hhmm: String?) -> String? {
+        guard let text = hhmm?.trimmed, text.count == 5, Array(text)[2] == ":",
+              let hour = Int(text.prefix(2)), let minute = Int(text.suffix(2)),
+              (0...23).contains(hour), (0...59).contains(minute) else { return nil }
+        let twelve = hour % 12 == 0 ? 12 : hour % 12
+        let half = hour >= 12 ? "PM" : "AM"
+        return minute == 0 ? "\(twelve) \(half)" : "\(twelve):\(String(format: "%02d", minute)) \(half)"
     }
 }
 
@@ -1148,13 +1275,18 @@ struct SheetTravel: Decodable, Hashable {
     var toAirport: String?
     var departDate: String?
     var returnDate: String?
+    /// "13:00": the disembark-day rule for this sailing (never earlier than 1 PM; a line's own rule may be later).
+    var returnNotBefore: String?
+    /// The server's note for Getting there (the disembark-day rule, "return after 1 PM assumed").
+    var note: String?
     var flight: SheetFlight?
     var searchUrl: String?
     var lineAir: SheetLineAir?
     var hotel: SheetHotel?
 
     enum CodingKeys: String, CodingKey {
-        case mode, fromAirport, toAirport, departDate, returnDate, flight, searchUrl, lineAir, hotel
+        case mode, fromAirport, toAirport, departDate, returnDate, returnNotBefore, note, flight, searchUrl, lineAir
+        case hotel
     }
 
     init(from decoder: Decoder) throws {
@@ -1164,6 +1296,8 @@ struct SheetTravel: Decodable, Hashable {
         toAirport = c.lenient(String.self, .toAirport)
         departDate = c.lenient(String.self, .departDate)
         returnDate = c.lenient(String.self, .returnDate)
+        returnNotBefore = c.lenient(String.self, .returnNotBefore)
+        note = c.lenient(String.self, .note)
         flight = c.lenient(SheetFlight.self, .flight)
         searchUrl = c.lenient(String.self, .searchUrl)
         lineAir = c.lenient(SheetLineAir.self, .lineAir)
@@ -1172,6 +1306,65 @@ struct SheetTravel: Decodable, Hashable {
 
     var modeValue: TravelMode { TravelMode(mode) }
     var searchLink: URL? { Fmt.webURL(searchUrl) }
+
+    /// "SEA–IAH": the fare's own route, else home airport to the port's airport.
+    var route: String? {
+        if let route = flight?.route?.trimmed, !route.isEmpty { return route }
+        let ends = [fromAirport, toAirport].compactMap { $0?.trimmed }.filter { !$0.isEmpty }
+        return ends.count == 2 ? ends.joined(separator: "–") : nil
+    }
+
+    /// "1 PM": the earliest flight home on the day the ship returns. Never earlier than the 1 PM default, whatever
+    /// a server or a line sends.
+    var returnAfter: String {
+        let given = [returnNotBefore, flight?.returnNotBefore].compactMap { $0?.trimmed }
+            .filter { ClockWords.words($0) != nil }
+        let latest = (given + [ClockWords.defaultReturnNotBefore]).max() ?? ClockWords.defaultReturnNotBefore
+        return ClockWords.words(latest) ?? "1 PM"
+    }
+
+    /// "recent fare seen Nov 25, SEA–IAH, per person, economy": what the flight figure is, so it never reads as a
+    /// quote.
+    var flightBasis: String? {
+        guard let flight, flight.isReady else { return nil }
+        var seen = "recent fare seen"
+        if let day = Fmt.day(flight.foundAt) {
+            seen += " \(Fmt.shortDay(day))"
+        } else if let basis = flight.basis?.trimmed, !basis.isEmpty {
+            return basis
+        } else if let age = flight.ageDays, age >= 0 {
+            seen += age == 0 ? " today" : (age == 1 ? " 1 day ago" : " \(age) days ago")
+        }
+        return [seen, route, "per person", "economy"].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    /// A date-level fare (no flight time) is priced on the rule, never on an earlier flight.
+    var returnAssumed: Bool {
+        guard let flight, flight.isReady else { return false }
+        return flight.returnTime == nil
+    }
+
+    /// "Out Fri Sep 3 · home Sat Sep 11, after 1 PM" (the time only with the disembark-day rule on).
+    func datesText(rule: Bool) -> String? {
+        var parts: [String] = []
+        if let out = Fmt.day(departDate) { parts.append("Out \(Fmt.weekday(out))") }
+        if let home = Fmt.day(returnDate) {
+            parts.append(rule ? "home \(Fmt.weekday(home)), after \(returnAfter)" : "home \(Fmt.weekday(home))")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// The disembark-day rule for Getting there (Jim: a 7 AM flight the day the ship returns is impossible). The
+    /// server's note when it sends one; else the app's own words, only while flight estimates are on.
+    func disembarkNote(flightsOn: Bool) -> String? {
+        guard modeValue == .fly else { return nil }
+        if let note = note?.trimmed, !note.isEmpty { return note }
+        guard flightsOn else { return nil }
+        if returnAssumed {
+            return "Return after \(returnAfter) assumed: the fare is for the day, not a flight, and a flight home before \(returnAfter) on the day the ship docks is never priced."
+        }
+        return "Flights home on the day the ship docks should leave at \(returnAfter) or later."
+    }
 }
 
 struct SheetItinerary: Decodable, Hashable {
@@ -1289,8 +1482,29 @@ struct DealSheet: Decodable, Hashable {
         return DealSheet.from(value)
     }
 
-    /// "for 2 adults + 1 child"
-    var partyText: String? { party?.words.map { "for \($0)" } }
+    /// "for 2 adults + 1 child", with the child's age on the sailing when the server knows it.
+    var partyText: String? {
+        guard let words = party?.words else { return nil }
+        if let ages = party?.agesText { return "for \(words) (\(ages))" }
+        return "for \(words)"
+    }
+
+    /// The flights line's words from the travel block: what the figure is, never a quote.
+    func detail(for line: SheetLine) -> String? {
+        guard line.key == "flights", let travel, let basis = travel.flightBasis else { return line.detail }
+        var text = basis
+        if let pp = travel.flight?.pp, let guests = party?.guests, guests > 0 {
+            text += " · about \(Fmt.usd(pp)) × \(guests), round trip"
+        }
+        if travel.returnAssumed { text += " · return after \(travel.returnAfter) assumed" }
+        return text
+    }
+
+    /// The flights line says it is an estimate and not a quote; every other line keeps its own tag.
+    func tag(for line: SheetLine) -> String {
+        guard line.key == "flights", travel?.flightBasis != nil, line.basisValue == .estimate else { return line.tag }
+        return "estimate · not a quote"
+    }
 
     /// "Cruise, taxes, tips $3,636": names only what the firm figure really holds (a line that is not shown is out).
     var firmText: String? {

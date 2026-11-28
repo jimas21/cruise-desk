@@ -235,9 +235,13 @@ enum Speech {
                     parts.append(cabin)
                 }
             }
-            if let total = deal.data.totalFor3 { parts.append("\(Fmt.usd(total)) \(PartyText.unit)") }
             if CatalogIndex.current.has(.sheet), let cost = deal.sheet?.tripCost, let range = cost.range {
-                parts.append("trip cost \(range.replacingOccurrences(of: "–", with: " to ")), verdict \(VerdictWord(cost.verdict).spoken)")
+                // The range, never the single totalFor3 figure (it hides the 3rd guest's unknown fare).
+                var spoken = "trip cost \(range.replacingOccurrences(of: "–", with: " to ")) \(PartyText.unit)"
+                if cost.complete == false { spoken += ", some costs not shown" }
+                parts.append("\(spoken), verdict \(VerdictWord(cost.verdict).spoken)")
+            } else if let total = deal.data.totalFor3 {
+                parts.append("\(Fmt.usd(total)) \(PartyText.unit)")
             }
             if let pp = deal.data.pricePP, pp > 0 {
                 parts.append("\(Fmt.usd(pp)) per person" + (deal.data.priceIncludesTaxes == true ? ", taxes in" : ""))

@@ -72,7 +72,7 @@ private struct DealDetailContent: View {
                     answerSection(feedback)
                 }
                 if let sheet = shownSheet {
-                    DealSheetSections(sheet: sheet, line: deal.line, part: .more)
+                    DealSheetSections(sheet: sheet, line: deal.line, part: .more, port: d.port)
                 }
                 if deal.kind == .sale {
                     offersSection

@@ -656,8 +656,8 @@ struct SearchFiltersForm: View {
                         PortPickerScreen(title: "Leaving from", kind: .embark, selection: listBinding(\.ports))
                     }
                     PickerLink(label: "Visits", value: chosenText(draft.calls, none: "Any port of call")) {
-                        PortPickerScreen(title: "Visits", kind: .call, selection: listBinding(\.calls),
-                                         footer: "Sailings that stop at any of these (scenic cruising like Glacier Bay counts).")
+                        PortPickerScreen(title: "Visits", kind: .visit, selection: listBinding(\.calls),
+                                         footer: "Sailings that stop at any of these. Scenic cruising counts too: Glacier Bay, Hubbard Glacier, Tracy Arm.")
                     }
                     PickerLink(label: "Region", value: chosenText(draft.regions, none: "Anywhere")) {
                         RegionPickerScreen(selection: listBinding(\.regions))

@@ -17,8 +17,19 @@ final class SnapshotTests: XCTestCase {
         let store = Store.preview()
         let empty = Store(previewDocs: [:])
         let v4 = Store.previewV4()
-        // v5 last: its catalog is a superset of v4's (the screens read the last store's catalog).
         let v5 = Store.previewV5()
+        // 1.6 last: its catalog is a superset of v5's (the screens read the last store's catalog).
+        let v6 = Store.previewV6()
+        let flySheet = try XCTUnwrap(Samples.sheetFly)
+        let driveSheet = try XCTUnwrap(Samples.sheetDrive)
+        func sheetPart(_ sheet: DealSheet, _ part: DealSheetSections.Part, port: String? = nil) -> AnyView {
+            AnyView(NavigationStack {
+                List { DealSheetSections(sheet: sheet, line: "Royal Caribbean", part: part, port: port) }
+                    .listStyle(.insetGrouped)
+                    .navigationTitle("Icon of the Seas")
+                    .navigationBarTitleDisplayMode(.inline)
+            })
+        }
         let firstRow = try XCTUnwrap(Samples.searchResult.rows.first)
         let router = Router()
         let callDeal = try XCTUnwrap(store.deal("sample-call"))
@@ -116,6 +127,20 @@ final class SnapshotTests: XCTestCase {
             ("67-addons-guide", AnyView(NavigationStack { AddonsGuideView(line: "Royal Caribbean") }), false, v5),
             ("68-trip-cost-settings", AnyView(NavigationStack { TripCostSettingsView() }), false, v5),
             ("69-settings-v5", AnyView(NavigationStack { SettingsView() }), false, v5),
+            // 1.6: flights in the trip cost, the disembark-day rule, drive ports, the soft budget, scenic Visits
+            ("70-deals-trip-cost-rows", AnyView(DealsView()), true, v6),
+            ("71-trip-cost-with-flights", sheetPart(flySheet, .cost), true, v6),
+            ("72-getting-there-fly", sheetPart(flySheet, .travel, port: "Galveston"), true, v6),
+            ("73-getting-there-drive", sheetPart(driveSheet, .travel, port: "Port Canaveral"), false, v6),
+            ("74-for-my-trip-soft-budget", AnyView(DealsView(bucket: .trip)), false, v6),
+            ("75-visits-picker", AnyView(NavigationStack {
+                PortPickerScreen(title: "Visits", kind: .visit, selection: .constant(["Glacier Bay"]))
+            }), false, v6),
+            ("76-track-builder-picker-only", AnyView(TrackBuilder(seed: TrackSeed(pick: nextStar, text: nil))), false, v6),
+            ("77-deal-sheet-flights", detail("sample-fits"), false, v6),
+            ("78-sailing-sheet-flights", AnyView(NavigationStack { SailingSheetScreen(row: firstRow) }), false, v6),
+            ("79-getting-there-large-text", AnyView(sheetPart(flySheet, .travel, port: "Galveston")
+                .environment(\.dynamicTypeSize, .accessibility2)), false, v6),
         ]
 
         for screen in screens {

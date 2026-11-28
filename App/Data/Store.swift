@@ -183,6 +183,8 @@ final class Store: ObservableObject {
     @Published fileprivate(set) var collectState: CollectState?
     /// `GET /v1/ships/photos`, loaded once per session when a screen with a ship on it opens.
     @Published fileprivate(set) var shipManifest: ShipPhotoManifest?
+    /// The server answered 422 to `kind=visit` (a v5 server from before 1.6): Visits asks for every port instead.
+    fileprivate var visitKindRefused = false
 
     private var dealIndex: [String: Deal] = [:]
     private var cache: CacheFile
@@ -276,7 +278,7 @@ final class Store: ObservableObject {
 
     /// Does this deal fit My Trip? Worked out live from `prefs/trip`, so the buckets move as soon as it changes.
     func fit(_ deal: Deal) -> TripFit {
-        TripCheck.verdict(for: deal, prefs: trip)
+        TripCheck.verdict(for: deal, prefs: trip, softBudget: has(.sheet))
     }
 
     /// The Deals tab: unanswered deals in one bucket, narrowed by the filters and sorted. Best deals keeps the deal
@@ -1326,12 +1328,29 @@ extension Store {
 
     // MARK: Catalog pickers
 
-    /// `GET /v1/catalog/ports`: search-as-you-type over the catalog's ports.
+    /// `GET /v1/catalog/ports`: search-as-you-type over the catalog's ports. `visit` (ports of call and scenic
+    /// cruising) is newer than the first v5 servers: one that refuses it is asked for every port instead, and the
+    /// ports that are only ever embark ports are dropped here.
     func catalogPorts(matching text: String, kind: PortKind, region: String? = nil, limit: Int = 50) async -> [CatalogPort] {
         if isPreview { return Samples.ports(matching: text, kind: kind) }
         guard let client = Connection.client() else { return [] }
-        return (try? await client.catalogPorts(q: text, kind: has(.catalog5) ? kind : nil, region: region,
-                                               limit: limit)) ?? []
+        guard has(.catalog5) else {
+            return (try? await client.catalogPorts(q: text, kind: nil, region: region, limit: limit)) ?? []
+        }
+        if kind == .visit && !visitKindRefused {
+            do {
+                return try await client.catalogPorts(q: text, kind: .visit, region: region, limit: limit)
+            } catch APIError.rejected {
+                visitKindRefused = true
+            } catch {
+                return []
+            }
+        }
+        if kind == .visit {
+            let all = (try? await client.catalogPorts(q: text, kind: .any, region: region, limit: 50)) ?? []
+            return all.filter { PortKind.visit.admits($0.kind) || $0.kind == nil }
+        }
+        return (try? await client.catalogPorts(q: text, kind: kind, region: region, limit: limit)) ?? []
     }
 
     // MARK: The sheet
@@ -1339,7 +1358,7 @@ extension Store {
     /// `GET /v1/sheet`: the trip cost and verdict for any sailing Deal Desk has seen.
     func sheet(sailingId: String, cabin: String?) async -> DealSheet? {
         guard has(.sheet), !sailingId.isEmpty else { return nil }
-        if isPreview { return Samples.sheet }
+        if isPreview { return has(.flights) ? Samples.sheetFly : Samples.sheet }
         guard let client = Connection.client() else { return nil }
         do {
             return try await client.sheet(sailingId: sailingId, cabin: cabin)

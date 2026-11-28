@@ -314,7 +314,7 @@ struct TripSummaryRow: View {
                     Text("My Trip")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Color.primary)
-                    Text(trip?.summary ?? "Not set up yet: using Claude's own trip rules")
+                    Text(trip?.summary(softBudget: CatalogIndex.current.has(.sheet)) ?? "Not set up yet: using Claude's own trip rules")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .lineLimit(3)

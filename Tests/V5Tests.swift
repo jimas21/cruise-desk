@@ -187,7 +187,7 @@ final class V5Tests: XCTestCase {
         XCTAssertEqual(third.tag, "not shown")
         let wifi = try XCTUnwrap(sheet.lines.first { $0.key == "addon:voom" })
         XCTAssertEqual(wifi.amountText, "$264 – $312")
-        XCTAssertEqual(sheet.budget?.line, "Cabin only vs your $3,200 budget: $3,119 – $4,395 (at the edge of the budget)")
+        XCTAssertEqual(sheet.budget?.line, "Up to $1,195 over your $3,200 target · cabin only $3,119 – $4,395")
         XCTAssertEqual(sheet.travel?.modeValue, .fly)
         XCTAssertEqual(sheet.itinerary?.text, "2 sea days · 3 port days")
         XCTAssertEqual(sheet.tripCost.range, "$3,716–5,040")

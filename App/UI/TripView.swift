@@ -118,7 +118,7 @@ struct TripEditor: View {
 
     private var countSection: some View {
         let waiting = store.inbox.filter { $0.kind != .sale }
-        let fitting = waiting.filter { TripCheck.evaluate($0, draft.cleaned()).fits }.count
+        let fitting = waiting.filter { TripCheck.evaluate($0, draft.cleaned(), softBudget: store.has(.sheet)).fits }.count
         return Section {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("\(fitting)")
@@ -360,9 +360,12 @@ struct TripEditor: View {
         }
     }
 
+    /// v5 (the server lists `sheet`): the budget is a soft target, never a filter.
+    private var softBudget: Bool { store.has(.sheet) }
+
     private var budgetSection: some View {
         Section {
-            MoneyField(label: "Most for the trip", value: $draft.budgetTotal)
+            MoneyField(label: softBudget ? "Target for the trip" : "Most for the trip", value: $draft.budgetTotal)
             Toggle("Trade-off zone", isOn: tradeoffOn)
             if draft.tradeoffBudget != nil {
                 MoneyField(label: "Comfortable up to", value: tradeoff)
@@ -379,8 +382,18 @@ struct TripEditor: View {
         } header: {
             Text("Budget")
         } footer: {
-            Text("Totals are for everyone going, taxes and tips in, before flights. Between the two amounts a deal still fits, marked as a trade-off.")
+            Text(budgetFooter)
         }
+    }
+
+    private var budgetFooter: String {
+        guard softBudget else {
+            return "Totals are for everyone going, taxes and tips in, before flights. Between the two amounts a deal still fits, marked as a trade-off."
+        }
+        let counts = store.trip?.budgetBasis == "trip"
+            ? "It counts the whole trip for everyone going: fare, taxes, tips, what you usually buy, flights and the hotel night."
+            : "It counts the cabin for everyone going: fare and taxes, before tips and flights."
+        return "A soft target, never a filter: a sailing over it still shows, and its trip cost says how far over (\"$640 over your \(Fmt.usd(draft.budgetTotal)) target\"). Less is better, so the verdict leans to cheaper sailings. \(counts) Change what it counts in Settings > Trip cost."
     }
 
     @ViewBuilder

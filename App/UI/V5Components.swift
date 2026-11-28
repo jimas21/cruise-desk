@@ -90,25 +90,32 @@ struct BasisTag: View {
     }
 }
 
-/// The trip cost on a list row: "Trip $5,980–7,240 · YOUR CALL".
+/// The trip cost on a list row: "Trip $5,980–7,240 · YOUR CALL". With `showRange` false (the row already shows
+/// the range large) it is the verdict and "+ not shown" only.
 struct TripCostLine: View {
     let cost: TripCost
+    var showRange = true
 
     var body: some View {
         if let range = cost.range {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("Trip")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Text(range)
-                    .font(.subheadline.weight(.semibold))
-                    .monospacedDigit()
+                if cost.verdict != nil && !showRange {
+                    VerdictChip(label: cost.verdict, small: true)
+                }
+                if showRange {
+                    Text("Trip")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text(range)
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                }
                 if cost.complete == false {
                     Text("+ not shown")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if cost.verdict != nil {
+                if cost.verdict != nil && showRange {
                     VerdictChip(label: cost.verdict, small: true)
                 }
             }

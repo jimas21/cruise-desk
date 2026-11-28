@@ -49,7 +49,7 @@ private struct TrackedDetailContent: View {
             }
             if store.has(.sheet), let sheet = item.sheet {
                 // v5: the trip cost for the party and the verdict lead (CONTRACT_V5 section 2.8).
-                DealSheetSections(sheet: sheet, line: item.line)
+                DealSheetSections(sheet: sheet, line: item.line, port: item.portName)
             }
             priceSection
             historySection

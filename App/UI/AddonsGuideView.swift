@@ -278,8 +278,9 @@ struct TripCostSettingsView: View {
             } header: {
                 Text("Budget counts")
             } footer: {
-                Text(basis == "cabin" ? "Your budget is the cabin: fare and taxes for the party, before tips and flights."
-                                      : "Your budget is the whole trip: fare, taxes, tips, what you buy, flights and the hotel night.")
+                Text((basis == "cabin" ? "Your budget is the cabin: fare and taxes for the party, before tips and flights."
+                                       : "Your budget is the whole trip: fare, taxes, tips, what you buy, flights and the hotel night.")
+                     + " It is a soft target: a sailing over it still shows, with how far over.")
             }
         }
         .navigationTitle("Trip cost")

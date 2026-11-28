@@ -64,7 +64,7 @@ struct RulesView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("My Trip")
                                     .foregroundStyle(Color.primary)
-                                Text(store.trip?.summary ?? "Not set up yet: Claude uses the rules it started with")
+                                Text(store.trip?.summary(softBudget: store.has(.sheet)) ?? "Not set up yet: Claude uses the rules it started with")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                                     .multilineTextAlignment(.leading)
