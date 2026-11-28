@@ -410,10 +410,10 @@ struct PortPickerScreen: View {
     let title: String
     let kind: PortKind
     @Binding var selection: [String]
-    var most = 10
-    var footer: String? = nil
     /// True when `selection` holds catalog port KEYS (seattle, port-canaveral) rather than display names.
     var byKey = false
+    var most = 10
+    var footer: String? = nil
     @EnvironmentObject private var store: Store
     @State private var text = ""
     @State private var results: [CatalogPort] = []
