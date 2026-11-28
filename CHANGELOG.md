@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/jimas21/cruise-desk/compare/v1.5.2...v1.6.0) (2026-11-28)
+
+
+### Features
+
+* Deal Desk 1.6: flight estimates in the trip cost, the disembark-day rule, a soft budget, scenic Visits ([2a0bce2](https://github.com/jimas21/cruise-desk/commit/2a0bce25c215302ef4761d8d64cf7809cb4d8196))
+
 ## [1.5.2](https://github.com/jimas21/cruise-desk/compare/v1.5.1...v1.5.2) (2026-11-28)
 
 
